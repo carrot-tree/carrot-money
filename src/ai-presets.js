@@ -82,6 +82,6 @@ function rememberCatalog(catalog,presetId,{baseUrl,models,at,reasoning}={}){
 }
 function isGo(url){try{const u=new URL(url);return u.protocol==='https:'&&u.hostname==='opencode.ai'&&/^\/(?:zen|inference)\/go(?:\/|$)/.test(u.pathname);}catch{return false;}}
 const sessionId=value=>typeof value==='string'&&/^[a-zA-Z0-9_-]{1,128}$/.test(value)?value:require('./core').uid();
-function goHeaders(url,id){return isGo(url)?{'User-Agent':'carrot-money/0.53.0','x-opencode-session':sessionId(id)}:{};}
+function goHeaders(url,id){return isGo(url)?{'User-Agent':'carrot-money/0.54.0','x-opencode-session':sessionId(id)}:{};}
 function headers(c,{sessionId}={}){let host='';try{host=new URL(c.baseUrl).hostname;}catch{}return {...(['api.xiaomimimo.com','token-plan-cn.xiaomimimo.com'].includes(host)?{'api-key':c.apiKey}:{Authorization:'Bearer '+c.apiKey}),...goHeaders(c.baseUrl,sessionId)};}
 module.exports={headers,isGo,sessionId,goHeaders,presets,DEFAULT,get,infer,restore,remember,select,clearKeys,localHost,target,sanitizeCatalog,catalogFor,rememberCatalog,catalogUrl};
