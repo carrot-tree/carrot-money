@@ -1,5 +1,5 @@
 'use strict';
-const C=require('./core'),Action=require('./ai-ask-action'),Sub=require('./ai-subscriptions');
+const C=require('./core'),Action=require('./ai-ask-action'),Sub=require('./ai-subscriptions'),Entries=require('./ai-entry-actions');
 const typeFor=(d,t)=>t.kind==='income'?'income':['expense','refund','reimbursement'].includes(t.kind)?'expense':t.kind==='legacy'?d.categories.find(c=>c.id===t.category)?.type:null;
 function category(d,t,id){const exact=d.categories.filter(c=>c.id===id),matches=exact.length?exact:d.categories.filter(c=>c.name===id||C.categoryName(d,c.id)===id),c=matches.length===1?matches[0]:null;if(!c||c.archived||c.type!==typeFor(d,t))throw Error('建议的分类不存在、已归档或收支类型不符');return c;}
 function validate(value,d,book,ranges){
@@ -21,7 +21,7 @@ function preview(d,book,findings,choices){
 }
 function history(turn){
  const a=turn.answer||{},receipt=turn.receipt,applied=new Set(turn.phase==='done'?receipt?.ids||[]:[]);
- const operation=a.task?{task:a.task,ids:a.ids,rows:a.rows?.map(({id,oldStr,newStr,reason})=>({id,oldStr,newStr,reason})),status:turn.phase||'待确认',executedIds:[...applied],unmodifiedIds:(a.ids||[]).filter(id=>!applied.has(id)),actualChanges:receipt?.changes,undo:turn.undoResult}:a.name?{name:a.name,status:turn.phase||'待确认',executedIds:receipt?.ids,proposed:Sub.names.has(a.name)&&!turn.phase?{arguments:a.args,item:Sub.describe(a.item)}:undefined,created:receipt?.item?(Sub.names.has(a.name)?Sub.describe(receipt.item):{id:receipt.id,...receipt.item}):undefined,undo:turn.undoResult}:undefined;
+ const operation=a.task?{task:a.task,ids:a.ids,rows:a.rows?.map(({id,oldStr,newStr,reason})=>({id,oldStr,newStr,reason})),status:turn.phase||'待确认',executedIds:[...applied],unmodifiedIds:(a.ids||[]).filter(id=>!applied.has(id)),actualChanges:receipt?.changes,undo:turn.undoResult}:a.name?{name:a.name,status:turn.phase||'待确认',executedIds:receipt?.ids,proposed:!turn.phase?(Entries.names.has(a.name)?{arguments:a.request,items:a.items,duplicates:a.duplicates}:a.name==='set_budget'?{arguments:a.request,item:a.item}:Sub.names.has(a.name)?{arguments:a.args,item:Sub.describe(a.item)}:undefined):undefined,createdEntries:receipt?.items,created:receipt?.item?(Sub.names.has(a.name)?Sub.describe(receipt.item):{id:receipt.id,...receipt.item}):undefined,undo:turn.undoResult}:undefined;
  const findings=a.findings?.map(({id,to,confidence,reason,question,options})=>({id,to,confidence,reason,question,options,resolved:turn.findingChoices?.[id],selected:turn.findingSelected?turn.findingSelected.includes(id):confidence==='certain'}));
  return {operation,findings};
 }

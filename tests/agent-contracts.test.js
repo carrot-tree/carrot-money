@@ -32,10 +32,10 @@ function scripted(...answers){let calls=0;const request=async()=>{assert.ok(call
 function options(d,requestUrl,extra={}){return {d,book:'daily',vault:vault(),settings:C.clone(settings),requestUrl,writeAccess:true,...extra};}
 
 test('unknown model tools become explicit unsupported replies with a usable manual route',async()=>{
- const d=ledger(),before=JSON.stringify(d),request=scripted({type:'tool',name:'update_budget',arguments:{amount:10000}});
- const answer=await Agent.run('设置预算',options(d,request));
- assert.equal(answer.status,'unsupported');assert.equal(answer.ok,false);assert.equal(answer.unsupported,'budget_write');
- assert.match(answer.message,/不能.*预算/);assert.match(answer.message,/没有执行/);assert.equal(answer.manualAction.tab,'budgets');
+ const d=ledger(),before=JSON.stringify(d),request=scripted({type:'tool',name:'restore_backup',arguments:{path:'fictional.json'}});
+ const answer=await Agent.run('恢复一个备份',options(d,request));
+ assert.equal(answer.status,'unsupported');assert.equal(answer.ok,false);assert.equal(answer.unsupported,'restore_data');
+ assert.match(answer.message,/不能.*恢复/);assert.match(answer.message,/没有执行/);assert.equal(answer.manualAction.tab,'data');
  assert.equal(request.calls(),1);assert.equal(JSON.stringify(d),before);
 });
 

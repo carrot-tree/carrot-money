@@ -1,8 +1,10 @@
 'use strict';
-const C=require('./core'),Subscriptions=require('./ai-subscriptions');
+const C=require('./core'),Subscriptions=require('./ai-subscriptions'),Entries=require('./ai-entry-actions'),Budgets=require('./ai-budget-actions');
 const own=(x,k)=>Object.prototype.hasOwnProperty.call(x,k);
 const object=x=>x&&typeof x==='object'&&!Array.isArray(x);
 function preview(d,book,name,args){
+ if(Entries.names.has(name))return Entries.preview(d,book,name,args);
+ if(Budgets.names.has(name))return Budgets.preview(d,book,name,args);
  if(Subscriptions.names.has(name))return Subscriptions.preview(d,book,name,args);
  if(!d.books.some(b=>b.id===book&&!b.archived))throw Error('当前账本不存在或已归档');
  if(!object(args))throw Error('工具参数无效');
@@ -26,6 +28,7 @@ function preview(d,book,name,args){
  return {ok:true,intent:'agent_write',name,book,ids:[...args.ids],signatures:rows.map(t=>JSON.stringify(t)),count:rows.length,amount,rows:rows.map(t=>({id:t.id,date:t.date,title:t.payee||t.title,amount:t.amount,currency:t.currency,oldStr:'账本',newStr:'回收站'})),actionName:'移入回收站',message:'这是预览，尚未删除。',facts:[]};
 }
 function withSelection(d,plan,ids){
+ if(Entries.names.has(plan.name))return Entries.withSelection(d,plan,ids);
  if(plan.name!=='delete_entries'||!Array.isArray(ids)||!ids.length||new Set(ids).size!==ids.length||ids.some(id=>!plan.ids.includes(id)))throw Error('请选择预览内的记录');
  const full=preview(d,plan.book,plan.name,{ids:plan.ids});
  if(JSON.stringify(full.signatures)!==JSON.stringify(plan.signatures))throw Error('记录已变化，请重新预览');
@@ -33,6 +36,8 @@ function withSelection(d,plan,ids){
  return {...plan,selectionIds:plan.ids.filter(id=>ids.includes(id))};
 }
 function apply(d,plan){
+ if(Entries.names.has(plan.name))return Entries.apply(d,plan);
+ if(Budgets.names.has(plan.name))return Budgets.apply(d,plan);
  if(Subscriptions.names.has(plan.name))return Subscriptions.apply(d,plan);
  const args=plan.name==='delete_entries'?{ids:plan.ids}:plan.name==='create_account'?{name:plan.item.name,type:plan.item.type}:plan.item;
  const fresh=preview(d,plan.book,plan.name,args);
@@ -48,6 +53,8 @@ function apply(d,plan){
  return {name:plan.name,book:plan.book,id,item:C.clone(item),count:1};
 }
 function undo(d,receipt){
+ if(Entries.names.has(receipt.name))return Entries.undo(d,receipt);
+ if(Budgets.names.has(receipt.name))return Budgets.undo(d,receipt);
  if(Subscriptions.names.has(receipt.name))return Subscriptions.undo(d,receipt);
  if(receipt.name==='delete_entries'){
   const ids=receipt.ids.filter(id=>d.trash.some(t=>t.id===id&&t.book===receipt.book));

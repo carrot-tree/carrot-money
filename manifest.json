@@ -1,7 +1,7 @@
 {
   "id": "carrot-money",
   "name": "Carrot 记账",
-  "version": "0.51.0",
+  "version": "0.52.0",
   "minAppVersion": "1.5.0",
   "description": "默认离线的账户、预算、收支与可续接的 AI 记账复核。",
   "author": "Carrot",

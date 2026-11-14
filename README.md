@@ -14,6 +14,16 @@
 - 柔雾紫与纸页绿两套外观，分别支持明暗模式。
 - 可选 AI 查询与修改建议；分类、账户、删除等修改先展示逐笔预览，确认后才执行，并提供撤销。
 
+## 用 Agent 直接记账
+
+例如：“10月12日买 Mac mini M6，9900元，微信零钱支付，分类电子产品。”Agent 会生成待确认预览。缺少账户或外币历史汇率时先追问；支持一笔、多笔、收入、内部转账、关联退款与报销到账。预览可以调整，确认后支持撤销。疑似重复默认不勾选。
+
+![Agent 新增账目，确认前核对日期、金额、账户和分类](https://raw.githubusercontent.com/carrot-tree/carrot-money/v0.52.0/docs/images/agent-create-preview.png)
+
+![重复账目默认不勾选，确认按钮暂不可用](https://raw.githubusercontent.com/carrot-tree/carrot-money/v0.52.0/docs/images/agent-duplicate-warning.png)
+
+可以通过对话设置循环预算或只调整某一期预算；明确查询账户余额时按真实资金发生日期计算，跨账本共用账户会提示前往资产账户查看完整余额。
+
 ## 退款算在原消费日
 
 真实流水保留到账日期，消费统计将关联退款冲回原消费日，账户余额仍按实际发生时间计算。
@@ -36,7 +46,7 @@
 
 ## 安装与更新
 
-1. 从 [Releases](https://github.com/carrot-tree/carrot-money/releases/latest) 下载 `Carrot-Money-0.51.0.zip`。
+1. 从 [Releases](https://github.com/carrot-tree/carrot-money/releases/latest) 下载 `Carrot-Money-0.52.0.zip`。
 2. 将压缩包中的 `carrot-money` 文件夹放入库的 `.obsidian/plugins/`。
 3. 在 Obsidian「设置 → 第三方插件」启用「Carrot 记账」。更新已安装版本后，重新加载该插件。
 
@@ -57,8 +67,8 @@ npm test
 npm run build
 ```
 
-源码位于 `src/`，构建入口为 `build.js`，发布运行文件为 `main.js`。当前包含76个源码模块、16个测试文件、301项自动回归。
+源码位于 `src/`，构建入口为 `build.js`，发布运行文件为 `main.js`。当前包含78个源码模块、17个测试文件、331项自动回归。
 
-0.51.0 的主要行为经过隔离虚构库中的 Obsidian 原生交互验收；主题和窄屏使用桌面容器／视口模拟。真实手机、iPad、系统文件选择器及本轮真实 AI 服务未作为已通过的验收项目。
+0.52.0 的 Agent 已使用真实 OpenCode Go（DeepSeek V4.1 Flash）进行场景测试，并在独立虚构账本中完成6组原生点击、确认与撤销验收，补验预算表单。真实手机、iPad、系统文件选择器和其他模型服务商未在本轮验收。
 
-[详细验证范围](https://github.com/carrot-tree/carrot-money/blob/v0.51.0/docs/verification.md)
+[详细验证范围](https://github.com/carrot-tree/carrot-money/blob/v0.52.0/docs/verification.md)
