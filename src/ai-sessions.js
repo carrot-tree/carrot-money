@@ -1,0 +1,14 @@
+'use strict';
+const C=require('./core');
+const ROOT='Carrot记账',PATH=ROOT+'/AI会话.json';
+const blank=()=>({version:1,books:{}});
+function turnForDisk(t,book){const value={question:String(t.question||''),answer:C.clone(t.answer||{}),book,mode:'ai',sourceRevision:t.sourceRevision??t.source?.revision??null};for(const key of ['phase','receipt','warning','reportStatus','findingChoices','findingSelected','parentTurn','undoResult','executedReceipt','workflow'])if(t[key]!==undefined)value[key]=C.clone(t[key]);if(value.answer.status==='working'){value.answer.status='stopped';value.answer.message='上次运行已中断，可继续提问。';}return value;}
+function snapshot(state,book){return {activeId:state.sessionId,sessions:state.sessions.map(s=>({id:s.id,title:s.title,archived:s.archived===true,createdAt:s.createdAt,updatedAt:s.updatedAt,input:s.id===state.sessionId?state.input:s.input||'',turns:(s.id===state.sessionId?state.turns:s.turns).map(t=>turnForDisk(t,book))}))};}
+function validate(value){if(!value||value.version!==1||!value.books||typeof value.books!=='object'||Array.isArray(value.books))throw Error('AI 会话文件格式无效');for(const [book,b]of Object.entries(value.books)){if(!book||!b||!Array.isArray(b.sessions))throw Error('AI 会话文件格式无效');const ids=new Set();for(const s of b.sessions){if(!s||typeof s.id!=='string'||!s.id||ids.has(s.id)||typeof s.title!=='string'||!Array.isArray(s.turns)||s.turns.some(t=>!t||typeof t.question!=='string'||!t.answer||t.book!==book))throw Error('AI 会话文件格式无效');ids.add(s.id);}if(b.sessions.length&&!ids.has(b.activeId))throw Error('AI 当前会话不存在');}return value;}
+class SessionStore{
+ constructor(vault){this.vault=vault;this.data=blank();this.raw=null;this.queue=Promise.resolve();this.error='';}
+ async load(){try{if(await this.vault.adapter.exists(PATH)){const raw=await this.vault.adapter.read(PATH);this.data=validate(JSON.parse(raw));this.raw=raw;}else{this.data=blank();this.raw=null;}this.error='';}catch(e){this.error='读取 AI 会话失败：'+e.message;}return this.data;}
+ get(book){return this.data.books[book]?C.clone(this.data.books[book]):null;}
+ save(book,state){const copy=snapshot(state,book);const job=this.queue.then(async()=>{if(this.error)throw Error(this.error);const exists=await this.vault.adapter.exists(PATH),raw=exists?await this.vault.adapter.read(PATH):null;if(raw!==this.raw)throw Error('AI 会话文件已在其他窗口更新，请重开记账页后继续');const draft=C.clone(this.data);draft.books[book]=copy;validate(draft);const text=JSON.stringify(draft);if(!await this.vault.adapter.exists(ROOT))await this.vault.createFolder(ROOT);if(exists){const f=this.vault.getAbstractFileByPath(PATH);await this.vault.process(f,current=>{if(current!==raw)throw Error('AI 会话保存时出现外部更新，已取消覆盖');return text;});}else await this.vault.create(PATH,text);this.data=draft;this.raw=text;});this.queue=job.catch(()=>{});return job;}
+}
+module.exports={SessionStore,PATH,snapshot,turnForDisk,validate};

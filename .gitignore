@@ -1,0 +1,12 @@
+node_modules/
+.obsidian/
+Carrot记账/
+work/
+releases/
+coverage/
+*.zip
+*.log
+.DS_Store
+**/data.json
+AI会话.json
+AI复核草稿.json
