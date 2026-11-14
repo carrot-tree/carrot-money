@@ -24,6 +24,24 @@
 
 可以通过对话设置循环预算或只调整某一期预算；明确查询账户余额时按真实资金发生日期计算，跨账本共用账户会提示前往资产账户查看完整余额。
 
+## 只修改这几笔，范围就保持这几笔
+
+把订单清单贴给 Agent，或先列出账目再说“把这些改一下”，Agent 会读取这些记录的最新内容并生成逐项预览。订单无法唯一匹配时先要求核对，不会把未列出的记录混进来。旧版误扩展为上千笔的复核任务，再点“继续复核”可按原清单重新核对；历史回答保留。
+
+![11笔清单的修改预览，真实OpenCode Go，虚构账本](https://raw.githubusercontent.com/carrot-tree/carrot-money/v0.53.0/docs/images/agent-scoped-preview.png)
+
+## 紧凑的分析界面
+
+颜色图例默认折叠。展开后可以搜索和隐藏分组，再点“保存为默认筛选”；同一账本下次打开分析时会沿用。默认筛选保存图表类型、显示指标和隐藏分组，不固定日期范围。主页和分析分别保存。
+
+![图例收起后的收支分析](https://raw.githubusercontent.com/carrot-tree/carrot-money/v0.53.0/docs/images/chart-compact.png)
+
+![展开图例、隐藏分组并保存默认筛选](https://raw.githubusercontent.com/carrot-tree/carrot-money/v0.53.0/docs/images/chart-filter-defaults.png)
+
+图表提示会靠边避让，不挡住鼠标继续选择其他柱体。明细列表突出日期、分类和金额，按钮高度一致，删除操作独立放在末尾。
+
+![柱状图提示避让右侧边缘](https://raw.githubusercontent.com/carrot-tree/carrot-money/v0.53.0/docs/images/chart-tooltip.png)
+
 ## 退款算在原消费日
 
 真实流水保留到账日期，消费统计将关联退款冲回原消费日，账户余额仍按实际发生时间计算。
@@ -46,7 +64,7 @@
 
 ## 安装与更新
 
-1. 从 [Releases](https://github.com/carrot-tree/carrot-money/releases/latest) 下载 `Carrot-Money-0.52.0.zip`。
+1. 从 [Releases](https://github.com/carrot-tree/carrot-money/releases/latest) 下载 `Carrot-Money-0.53.0.zip`。
 2. 将压缩包中的 `carrot-money` 文件夹放入库的 `.obsidian/plugins/`。
 3. 在 Obsidian「设置 → 第三方插件」启用「Carrot 记账」。更新已安装版本后，重新加载该插件。
 
@@ -67,8 +85,8 @@ npm test
 npm run build
 ```
 
-源码位于 `src/`，构建入口为 `build.js`，发布运行文件为 `main.js`。当前包含78个源码模块、17个测试文件、331项自动回归。
+源码位于 `src/`，构建入口为 `build.js`，发布运行文件为 `main.js`。当前包含80个源码模块、18个测试文件、352项自动回归。
 
-0.52.0 的 Agent 已使用真实 OpenCode Go（DeepSeek V4.1 Flash）进行场景测试，并在独立虚构账本中完成6组原生点击、确认与撤销验收，补验预算表单。真实手机、iPad、系统文件选择器和其他模型服务商未在本轮验收。
+0.53.0 使用真实 OpenCode Go（DeepSeek V4.1 Flash）验证具体清单、自然追问和旧断点恢复；在独立虚构 Obsidian 库中完成6组定向界面验收，以及真实模型预览、确认和撤销。桌面模拟宽度覆盖1440、1024、720、390；真实手机、iPad、系统文件选择器和其他模型服务商未在本轮验收。
 
-[详细验证范围](https://github.com/carrot-tree/carrot-money/blob/v0.52.0/docs/verification.md)
+[详细验证范围](https://github.com/carrot-tree/carrot-money/blob/v0.53.0/docs/verification.md)

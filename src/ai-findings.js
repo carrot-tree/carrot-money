@@ -6,7 +6,7 @@ function validate(value,d,book,ranges){
  if(!Array.isArray(value)||value.length>d.entries.length)throw Error('分类建议清单无效');
  const seen=new Set();return value.map(f=>{
   if(!f||typeof f!=='object'||Array.isArray(f)||Object.keys(f).some(k=>!['id','to','reason','confidence','question','options'].includes(k))||typeof f.id!=='string'||seen.has(f.id)||!['certain','uncertain'].includes(f.confidence)||typeof f.reason!=='string'||!f.reason.trim()||f.reason.length>500)throw Error('每条建议须有唯一记录 ID、依据与确定程度');
-  seen.add(f.id);const t=d.entries.find(t=>t.id===f.id&&t.book===book);if(!t||!ranges.some(r=>t.date>=r.start&&t.date<=r.end))throw Error('建议必须来自已完整读取的期间账单');
+  seen.add(f.id);const t=d.entries.find(t=>t.id===f.id&&t.book===book);if(!t||!ranges.some(r=>require('./ai-entry-scope').covers(r,t)))throw Error('建议必须来自已完整读取的期间账单');
   const to=f.to===''||f.to===null?undefined:f.to;const target=to!==undefined?category(d,t,to).id:undefined;if(f.confidence==='certain'&&!target)throw Error('确定的建议须指定目标分类');
   if(f.question!==undefined&&(typeof f.question!=='string'||f.question.length>300))throw Error('待核实问题无效');
   if(f.options!==undefined&&(!Array.isArray(f.options)||f.options.length>8||new Set(f.options).size!==f.options.length))throw Error('待核实选项无效');const options=(f.options||[]).map(id=>category(d,t,id).id);if(new Set(options).size!==options.length)throw Error('待核实选项重复');

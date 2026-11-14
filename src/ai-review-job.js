@@ -3,6 +3,8 @@ const C=require('./core'),T=require('./ai-agent-tools'),Findings=require('./ai-f
 const MAX_ROWS=80,MAX_CHARS=24000,MAX_REQUEST_CHARS=40000;
 const resumeText=/^(?:继续(?:核对|复核|检查|分析|分类复核)?|接着(?:核对|复核|检查|分析)|重试(?:复核|当前批次)?)[。！!\s]*$/;
 function resume(question,history){if(!resumeText.test(question.trim()))return null;const last=history.at(-1)?.answer;return last?.reviewJob?last:null;}
+function parseJSON(content){const text=String(content||'').trim(),fenced=/^```(?:json)?\s*([\s\S]*?)\s*```$/i.exec(text);return JSON.parse(fenced?fenced[1]:text);}
+function retrySmaller(error){return /超时|timeout|timed out|截断|输出.*太大/i.test(String(error));}
 function needsBatch(result){return result.data.rows.length>MAX_ROWS||JSON.stringify(result.data.rows).length>MAX_CHARS;}
 // This checksum detects changed input, not an authentication boundary. Raw source
 // signatures on findings are also revalidated before any preview or mutation.
@@ -13,14 +15,14 @@ async function run(question,{d,book,range,settings,cfg,history=[],preferences=[]
  const start=startedAt??clock(),deadline=start+cfg.agentMaxSeconds*1000,activePrefs=preferences.filter(p=>p.enabled===true).map(({id,text})=>({id,text}));
  const state={ok:false,intent:'agent',engine:'AI Agent',status:'working',steps:[...(initialState?.steps||[])],toolCalls:initialState?.toolCalls||0,usage:{promptTokens:0,completionTokens:0,totalTokens:0,reported:false,...initialState?.usage},facts:[],providedContext:[],sentFields:[],memory:{reviewRanges:[],toolResults:[]},outcome:'review',execution:{status:'not_executed',message:'本轮只核对分类，尚未修改账本。'},reviewJob:null};
  const emit=()=>{state.elapsedMs=clock()-start;onProgress(C.clone(state));};
- const stop=reason=>{state.ok=false;state.status=signal?.aborted?'stopped':state.reviewJob?.offset?'partial':'error';const j=state.reviewJob;state.message=(j?`已核对 ${j.offset} / ${j.total} 笔；${j.offset===j.total?'核对已结束，结果保存尚未完成。':'尚未完成整个期间的复核。'}`:'未开始分类复核。')+reason+(state.checkpointError?' 进度目前只保留在当前页面，请解决保存问题后再继续，不要关闭页面。':j?' 已完成批次保留，点击「继续复核」可从检查点继续。':' 请调整要求后重试。')+'本轮未修改账本。';emit();return state;};
+ const stop=reason=>{state.ok=false;state.status=signal?.aborted?'stopped':state.reviewJob?.offset?'partial':'error';const j=state.reviewJob;state.message=(j?`已核对 ${j.offset} / ${j.total} 笔；${j.offset===j.total?'核对已结束，结果保存尚未完成。':'尚未完成本次范围的复核。'}`:'未开始分类复核。')+reason+(state.checkpointError?' 进度目前只保留在当前页面，请解决保存问题后再继续，不要关闭页面。':j?' 已完成批次保留，点击「继续复核」可从检查点继续。':' 请调整要求后重试。')+'本轮未修改账本。';emit();return state;};
  const checkpoint=async()=>{try{await onCheckpoint(C.clone(state));}catch(e){state.checkpointError=true;throw e;}};
  const check=()=>{if(signal?.aborted)throw Error('已停止。');if(!shouldContinue())throw Error('账本、会话或设置已变化。');if(clock()>=deadline)throw Error('已达到本轮时间上限。');};
  try{
   check();const source=T.reviewEntries(d,book,range),rows=source.data.rows,categories=T.categories(d).data.categories;
-  const hash=fingerprint({book,range,entries:d.entries.filter(t=>t.book===book&&t.date>=range.start&&t.date<=range.end),categories,preferences:activePrefs});
+  const hash=fingerprint({book,range,entries:d.entries.filter(t=>t.book===book&&t.date>=range.start&&t.date<=range.end&&(!range.ids||range.ids.includes(t.id))),categories,preferences:activePrefs});
   const old=previous?.reviewJob;
-  if(old&&(old.version!==1||old.book!==book||old.start!==range.start||old.end!==range.end||old.fingerprint!==hash||old.total!==rows.length||!Number.isInteger(old.offset)||old.offset<0||old.offset>rows.length||!Array.isArray(old.findings))){state.status='needs_input';state.message='账目、分类或记账偏好已变化，原检查点不能继续使用。请按原时间范围重新发起分类复核；旧结果保留，本轮未修改账本。';emit();return state;}
+  if(old&&(old.version!==1||old.book!==book||old.start!==range.start||old.end!==range.end||JSON.stringify(old.ids||null)!==JSON.stringify(range.ids||null)||old.fingerprint!==hash||old.total!==rows.length||!Number.isInteger(old.offset)||old.offset<0||old.offset>rows.length||!Array.isArray(old.findings))){state.status='needs_input';state.message='账目、分类或记账偏好已变化，原检查点不能继续使用。请按原时间范围重新发起分类复核；旧结果保留，本轮未修改账本。';emit();return state;}
   const context=old?.context||history.slice(-2).map(t=>({question:String(t.question||'').slice(0,500),answer:String(t.answer?.message||'').slice(0,700)}));
   state.reviewJob=old?C.clone(old):{version:1,id:C.uid(),book,...range,question,total:rows.length,offset:0,batches:0,findings:[],fingerprint:hash,context};const job=state.reviewJob;
   if(old){const seen=new Set(rows.slice(0,old.offset).map(t=>t.id));if(old.findings.some(f=>!seen.has(f.id)))throw Error('检查点建议包含未核对记录，请重新复核');Findings.validate(old.findings,d,book,[range]);}
@@ -29,7 +31,7 @@ async function run(question,{d,book,range,settings,cfg,history=[],preferences=[]
   while(job.offset<rows.length){
    check();if(state.toolCalls>=cfg.agentMaxCalls||state.usage.totalTokens>=cfg.agentMaxTokens)return stop('已达到本轮处理额度。');
    let page=batch(rows,job.offset,job.batchSize||MAX_ROWS);let accepted=false,lastError='';
-   for(let attempt=0;attempt<2&&!accepted;attempt++){
+   for(let attempt=0;attempt<3&&!accepted;attempt++){
     check();if(state.usage.totalTokens>=cfg.agentMaxTokens)return stop('已达到本轮 token 上限。');state.stage=`正在核对 ${job.offset+1}–${page.nextOffset} 笔 · 已完成 ${job.offset} / ${job.total} 笔`;state.message=state.stage;emit();
     const payload={task:'category_review_batch',question:job.question,context,preferences:activePrefs,categories,range,batch:{offset:page.offset,total:job.total,rows:page.rows},...(lastError?{correction:lastError}:{} )};
     const messages=[{role:'system',content:prompt},{role:'user',content:JSON.stringify(payload)}],characters=messages.reduce((n,m)=>n+m.content.length,0);
@@ -40,19 +42,19 @@ async function run(question,{d,book,range,settings,cfg,history=[],preferences=[]
     try{
      const r=await Remote.completion({...remote,timeoutSeconds:Math.min(remote.timeoutSeconds,Math.max(1,Math.ceil((deadline-clock())/1000)))},{model:remote.model,stream:false,temperature:0,max_tokens:Math.min(cfg.agentMaxOutputTokens,12000),messages},requestUrl,{signal:controller.signal});check();
      for(const [k,wire]of [['promptTokens','prompt_tokens'],['completionTokens','completion_tokens'],['totalTokens','total_tokens']])state.usage[k]+=Number(r.usage?.[wire]||0);if(Object.keys(r.usage||{}).length)state.usage.reported=true;
-     if(r.finishReason==='length'){job.batchSize=Math.max(1,Math.floor(page.rows.length/2));page=batch(rows,job.offset,job.batchSize);throw Error('本批输出被截断，已缩小批量，请用简短依据重新核对');}const value=JSON.parse(r.content);
+     if(r.finishReason==='length'){job.batchSize=Math.max(1,Math.floor(page.rows.length/2));page=batch(rows,job.offset,job.batchSize);throw Error('本批输出被截断，已缩小批量，请用简短依据重新核对');}const value=parseJSON(r.content);
      if(!value||Array.isArray(value)||Object.keys(value).some(k=>k!=='findings')||!Array.isArray(value.findings))throw Error('本批只接受findings数组');
      const ids=new Set(page.rows.map(t=>t.id));if(value.findings.some(f=>!ids.has(f?.id)))throw Error('建议只能引用本批已读记录');
      Findings.validate(value.findings,d,book,[range]);for(const row of page.rows.filter(t=>t.truncatedFields?.length)){const f=value.findings.find(f=>f.id===row.id);if(!f||f.confidence!=='uncertain'||!f.question)throw Error('正文截断的记录必须标记待核实并询问补充内容');}
      job.findings.push(...value.findings);job.offset=page.nextOffset;job.batches++;state.toolCalls++;accepted=true;
      state.steps.push({name:'review_batch',arguments:{start:range.start,end:range.end,offset:page.offset},summary:`已核对 ${job.offset} / ${job.total} 笔，累计 ${job.findings.length} 项建议`,durationMs:0,dataFields:state.providedContext[0].dataFields});
-    }catch(e){if(signal?.aborted||!shouldContinue()||clock()>=deadline)throw e;lastError=e instanceof Remote.ProviderError?Remote.transportReason(e):e.message;if(/HTTP (400|401|403|404|429)/.test(lastError))throw Error(lastError);}
+    }catch(e){lastError=e instanceof Remote.ProviderError?Remote.transportReason(e):e.message;if(!signal?.aborted&&shouldContinue()&&(retrySmaller(lastError)||clock()>=deadline)){job.batchSize=Math.max(1,Math.floor(page.rows.length/2));page=batch(rows,job.offset,job.batchSize);job.lastRetryReason=lastError;state.stage='本批超时或输出过长，已缩小为 '+job.batchSize+' 笔后重试';emit();}if(signal?.aborted||!shouldContinue()||clock()>=deadline)throw e;if(/HTTP (400|401|403|404|429)/.test(lastError))throw Error(lastError);}
     finally{clearTimeout(timer);signal?.removeEventListener('abort',abort);}
    }
    if(!accepted)throw Error('本批未通过校验：'+lastError);
    check();state.stage=`已核对 ${job.offset} / ${job.total} 笔，正在保存进度`;state.message=state.stage;emit();await checkpoint();check();
   }
-  state.findings=Findings.validate(job.findings,d,book,[range]);state.memory.reviewRanges=[range];state.ok=true;state.status='done';state.stage='分类复核完成';state.message=`已复核 ${range.start} 至 ${range.end} 的全部 ${job.total} 笔账单。`+(state.findings.length?`共有 ${state.findings.filter(f=>f.confidence==='certain').length} 项分类调整建议、${state.findings.filter(f=>f.confidence==='uncertain').length} 项待核实。请核对下方逐笔建议，再生成修改预览。`:'未发现需要调整或待核实的分类。')+' 本轮没有修改账本。';emit();await checkpoint();return state;
- }catch(e){return stop(e?.message||'复核中断。');}
+  state.findings=Findings.validate(job.findings,d,book,[range]);state.memory.reviewRanges=[range];state.ok=true;state.status='done';state.stage='分类复核完成';state.message=(range.ids?`已复核所选的 ${job.total} 笔账目。`:`已复核 ${range.start} 至 ${range.end} 的全部 ${job.total} 笔账单。`)+(state.findings.length?`共有 ${state.findings.filter(f=>f.confidence==='certain').length} 项分类调整建议、${state.findings.filter(f=>f.confidence==='uncertain').length} 项待核实。请核对下方逐笔建议，再生成修改预览。`:'未发现需要调整或待核实的分类。')+' 本轮没有修改账本。';emit();await checkpoint();return state;
+ }catch(e){const result=stop(e?.message||'复核中断。');if(state.reviewJob&&!state.checkpointError)try{await checkpoint();}catch{stop('保存进度失败，请保留当前页面。');}return result;}
 }
-module.exports={MAX_ROWS,MAX_CHARS,MAX_REQUEST_CHARS,needsBatch,batch,fingerprint,resume,run};
+module.exports={MAX_ROWS,MAX_CHARS,MAX_REQUEST_CHARS,needsBatch,batch,fingerprint,resume,run,parseJSON,retrySmaller};
