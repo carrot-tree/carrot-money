@@ -129,3 +129,31 @@ test('conversation deletion rolls back in memory when its persistence step fails
  assert.equal(state.sessionId,'recent');assert.deepEqual(state.sessions.map(s=>s.id),['old','recent']);assert.equal(state.busy,false);assert.match(state.storageError,/模拟保存失败/);
  assert.deepEqual(store.get('daily'),before);
 });
+
+test('disabling a saved AI service stops all open AI sessions and preserves their drafts and history',async()=>{
+ const {v}=await sessionView();v.d.settings=C.clone(settings);
+ const local=UI.stateFor(v);local.input='本地问题';local.busy=true;
+ const states=[];let aborted=0;
+ for(const book of ['daily','private-book']){v.book=book;const s=UI.stateFor(v,'ai');s.enabled=true;s.agreed=true;s.busy=true;s.input='尚未发送的草稿';s.controller={abort(){aborted++;}};s.turns.push({question:'继续核对',answer:{status:'working',reviewJob:{offset:12,total:17},message:'正在核对'}});states.push(s);}
+ const ledgerBefore=JSON.stringify(v.d.entries);v.d.settings.aiEnhancement.enabled=false;UI.syncAvailability(v);
+ assert.equal(aborted,2);
+ for(const s of states){assert.equal(s.enabled,false);assert.equal(s.agreed,false);assert.equal(s.busy,false);assert.equal(s.controller,null);assert.equal(s.input,'尚未发送的草稿');assert.equal(s.turns.at(-1).answer.status,'stopped');assert.deepEqual(s.turns.at(-1).answer.reviewJob,{offset:12,total:17});assert.match(s.error,/本地快捷查询/);}
+ assert.equal(local.input,'本地问题');assert.equal(local.busy,true);assert.equal(JSON.stringify(v.d.entries),ledgerBefore);
+ UI.syncAvailability(v);assert.equal(aborted,2,'a repeated render does not abort or increment the generation again');
+ v.d.settings.aiEnhancement.enabled=true;UI.syncAvailability(v);assert.ok(states.every(s=>!s.enabled),'restoring the global service does not grant session consent');
+});
+
+test('Agent disable or key removal revokes an open session; unsaved settings do not',async()=>{
+ for(const field of ['agentEnabled','apiKey']){
+  const {v}=await sessionView();v.d.settings=C.clone(settings);const s=UI.stateFor(v,'ai');s.enabled=true;s.agreed=true;s.input='保留';
+  const unsaved=C.clone(v.d.settings);unsaved.aiEnhancement[field]=field==='apiKey'?'':false;UI.syncAvailability(v);assert.equal(s.enabled,true);
+  v.d.settings=unsaved;UI.syncAvailability(v);assert.equal(s.enabled,false);assert.equal(s.input,'保留');
+ }
+});
+
+test('a disabled global service prevents stale session state from making a model request',async()=>{
+ const {v}=await sessionView();v.d.settings=C.clone(settings);v.d.settings.aiEnhancement.enabled=false;
+ const s=UI.stateFor(v,'ai');s.enabled=true;s.agreed=true;let calls=0;
+ await UI.submit(v,'记一笔午餐20元',{mode:'ai',requestUrl:async()=>{calls++;throw Error('must not request');}});
+ assert.equal(calls,0);assert.equal(s.turns.length,0);assert.equal(s.enabled,false);assert.match(s.error,/服务已关闭/);
+});

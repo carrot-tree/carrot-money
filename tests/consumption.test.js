@@ -16,3 +16,22 @@ test('budget spending follows original consumption date, including cross-month r
 test('account and tag spending belong to the original purchase even when a refund enters another account',()=>{const d=fixture();d.accounts.push({id:'other',name:'虚构收退款账户',currency:'CNY',rate:1,opening:0});add(d,'buy','expense','2026-10-31',10000,'',{tags:['虚构标签']});add(d,'return','refund','2026-11-02',3000,'buy',{account:'other',tags:[]});assert.equal(C.totals(C.consumption(d,{account:'cash',tag:'虚构标签'})).expense,7000);assert.equal(C.totals(C.consumption(d,{account:'other'})).expense,0);assert.equal(C.accountBalance(d,'other'),3000);});
 test('Agent statistics explain consumption basis while detail rows retain actual refund money',()=>{const T=require('../src/ai-agent-tools'),d=example(),purchase=T.stats(d,'daily',{start:'2026-10-15',end:'2026-10-15'}).data,arrival=T.stats(d,'daily',{start:'2026-10-18',end:'2026-10-18'}).data,raw=T.rows(d,'daily',{start:'2026-10-18',end:'2026-10-18'}).data;assert.equal(purchase.expense,62500);assert.equal(purchase.grossExpense,197500);assert.equal(arrival.expense,72891);assert.match(purchase.accountingBasis,/原支出日/);assert.equal(raw.rows.find(t=>t.id==='a').amount,50000);assert.equal(raw.rows.find(t=>t.id==='a').expense,-50000);});
 test('local expense queries use the same purchase-month consumption as analysis',()=>{const Ask=require('../src/ai-ask'),d=example(),query=Ask.parseLocal('2026年10月按分类支出',d,'daily','2026-11-14'),result=Ask.compute(query,d,'daily');assert.equal(result.ok,true);assert.ok(result.facts.some(f=>f.value===135391));});
+test('recent transactions retain cash amounts when their rows came from consumption statistics',()=>{
+ const UI=require('../src/entry-tools'),d=example(),before=JSON.stringify(d),rows=C.consumption(d),buy=rows.find(t=>t.id==='order'),refund=rows.find(t=>t.id==='a');
+ assert.equal(C.impact(buy).expense,62500);assert.equal(C.impact(refund).expense,0);
+ assert.equal(UI.cashAmount(buy).text,'− ¥ 1,975.00');assert.equal(UI.cashAmount(refund).text,'+ ¥ 500.00');
+ assert.equal(JSON.stringify(d),before);assert.equal(C.accountBalance(d,'cash'),864609);
+});
+test('cash labels distinguish reimbursements, signed balance adjustments, transfers and legacy records',()=>{
+ const {cashAmount}=require('../src/entry-tools'),base={currency:'CNY',amount:25000};
+ assert.deepEqual(cashAmount({...base,kind:'reimbursement'}),{text:'+ ¥ 250.00',tone:'balance'});
+ assert.equal(cashAmount({...base,kind:'adjustment',amount:-2535}).text,'− ¥ 25.35');
+ assert.equal(cashAmount({...base,kind:'adjustment'}).text,'+ ¥ 250.00');
+ assert.equal(cashAmount({...base,kind:'transfer',currency:'USD'}).text,'↔ USD 250.00');
+ assert.equal(cashAmount({kind:'legacy',legacyIncome:10000,legacyExpense:2500}).text,'收入 ¥ 100.00 / 支出 ¥ 25.00');
+});
+test('small calendar cells use explicit compact units while preserving cent-sized values',()=>{
+ const {compactMoney}=require('../src/entry-tools');
+ for(const [cents,text]of [[1,'0.01'],[5860,'58.6'],[126880,'1.3千'],[2500000,'2.5万'],[71993,'720'],[99999999,'100万'],[10000000000,'1亿']])assert.equal(compactMoney(cents),text);
+ assert.equal(compactMoney(-126880),'1.3千');
+});

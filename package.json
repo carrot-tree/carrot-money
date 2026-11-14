@@ -1,6 +1,6 @@
 {
   "name": "carrot-money",
-  "version": "0.54.0",
+  "version": "0.54.1",
   "private": true,
   "scripts": {
     "build": "node build.js",

@@ -3,6 +3,15 @@ const C=require('./core');
 const names=new Set(['create_entry','create_entries']);
 const fields=['kind','title','date','amount','currency','rate','category','account','toAccount','toAmount','related','note','payee','person','tags','reimbursable','splits'];
 const object=x=>x&&typeof x==='object'&&!Array.isArray(x);
+// Only explicit creation commands carry a fixed count. Other numbers (prices,
+// dates, past queries) must not turn into an inferred number of new entries.
+function requestedCount(question){
+ const matches=[...String(question).matchAll(/(?:^|[，,。；;：:\n]|帮我|请|再|先|给我)\s*(?:记录|记|新增|添加)(?:账|下|上|入|一下)?\s*([0-9]{1,2}|[一二两三四五六七八九十]{1,3})\s*笔/g)];
+ if(matches.length!==1)return null;
+ const text=matches[0][1],digits={一:1,二:2,两:2,三:3,四:4,五:5,六:6,七:7,八:8,九:9};
+ let count;if(/^\d+$/.test(text))count=Number(text);else if(text.includes('十')){const [a,b]=text.split('十');if(text.split('十').length!==2||a&&!digits[a]||b&&!digits[b])return null;count=(a?digits[a]:1)*10+(b?digits[b]:0);}else count=digits[text];
+ return Number.isInteger(count)&&count>=1&&count<=50?count:null;
+}
 function argsList(name,args){
  if(!names.has(name)||!object(args))throw Error('新增账目参数无效');
  if(args.replacesTurn!==undefined&&(!Number.isInteger(args.replacesTurn)||args.replacesTurn<1))throw Error('替代预览轮次无效');
@@ -81,4 +90,4 @@ function edit(d,plan,id,changes){
  const args=C.clone(plan.request),raw=plan.name==='create_entry'?args:args.entries[at];Object.assign(raw,changes);
  return preview(d,plan.book,plan.name,args,{ids:plan.ids});
 }
-module.exports={names,preview,withSelection,apply,undo,edit};
+module.exports={names,requestedCount,preview,withSelection,apply,undo,edit};

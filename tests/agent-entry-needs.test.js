@@ -6,6 +6,9 @@ const raw=(extra={})=>({kind:'expense',title:'Mac mini M6',date:'2026-10-12',amo
 const plan=(d,x={})=>E.preview(d,'daily','create_entry',raw(x));
 function seed(d,x={}){const t=C.newEntry(d,{id:'original',...raw(x)});d.entries.push(t);C.validate(d);return t;}
 const clone=C.clone;
+test('explicit entry counts distinguish creation commands from prices, dates and negated commands',()=>{
+ for(const [text,n]of [['记两笔：早餐8元，地铁4元',2],['今天帮我记 12 笔支出',12],['新增二十三笔',23],['请记一笔10月12日支出1975元',1],['查最近两笔支出',null],['不要记两笔，只记一笔',null],['午餐20元',null],['记两笔，再记三笔',null]])assert.equal(E.requestedCount(text),n,text);
+});
 test('new human bookkeeping tools are in the advertised tool catalog',()=>{for(const n of ['create_entry','create_entries','set_budget','account_balance'])assert.ok(T.names.includes(n),n);});
 test('new expense remains a preview, posts original amount and can be recovered from trash after undo',()=>{const d=ledger(),before=clone(d),p=plan(d);assert.deepEqual(d,before);assert.equal(p.items[0].amount,990000);const r=W.apply(d,p);assert.equal(C.accountBalance(d,'wallet'),10000);assert.equal(d.entries[0].date,'2026-10-12');assert.equal(W.undo(d,r).restored,1);assert.equal(d.entries.length,0);assert.equal(d.trash[0].amount,990000);});
 test('income posts to its receiving account',()=>{const d=ledger();W.apply(d,plan(d,{kind:'income',category:'cat-9',amount:80000,account:'bank'}));assert.equal(C.accountBalance(d,'bank'),2080000);assert.equal(C.totals(d.entries).income,80000);assert.equal(C.totals(d.entries).expense,0);});
@@ -24,6 +27,19 @@ test('balance reads respect date and do not leak shared-account entries from ano
 const settings={aiEnhancement:{enabled:true,presetId:'custom',baseUrl:'https://example.invalid/v1',apiKey:'fictional',model:'fictional',agentEnabled:true,agentMaxCalls:6,agentMaxSeconds:30,agentMaxTokens:200000}};
 function vault(){const f=new Map();return {adapter:{exists:async p=>f.has(p)},createFolder:async p=>f.set(p,''),create:async(p,t)=>f.set(p,t),getAbstractFileByPath:p=>f.has(p)?{path:p}:null};}
 function scripted(...answers){let n=0;return async q=>{assert.ok(n<answers.length,'extra call');const value=typeof answers[n]==='function'?answers[n](JSON.parse(q.body)):answers[n];n++;return {status:200,json:{choices:[{message:{content:JSON.stringify(value)},finish_reason:'stop'}],usage:{total_tokens:20}}};};}
+test('a request for two entries rejects a partial model proposal and repairs it before presenting a preview',async()=>{
+ const d=ledger(),items=[raw({title:'早餐',amount:800,category:'cat-0'}),raw({title:'地铁',amount:400,category:'cat-1'})];
+ const requestUrl=scripted({type:'tool',name:'accounts',arguments:{}},{type:'tool',name:'create_entry',arguments:items[0]},body=>{assert.ok(body.messages.some(m=>m.content.includes('用户明确要求新增 2 笔')));return {type:'tool',name:'create_entries',arguments:{entries:items}};});
+ const answer=await Agent.run('记两笔：10月12日早餐8元、地铁4元，都用微信零钱',{d,book:'daily',vault:vault(),settings,requestUrl,writeAccess:true});
+ assert.equal(answer.status,'preview');assert.equal(answer.count,2);assert.deepEqual(answer.items.map(t=>t.amount),[800,400]);assert.equal(d.entries.length,0);
+ W.apply(d,answer);assert.equal(d.entries.length,2);assert.equal(C.totals(d.entries).expense,1200);
+});
+test('a repeatedly incomplete two-entry proposal never exposes a one-entry confirmation',async()=>{
+ const d=ledger();let calls=0;
+ const requestUrl=async()=>{const value=calls++===0?{type:'tool',name:'accounts',arguments:{}}:{type:'tool',name:'create_entry',arguments:raw({title:'早餐',amount:800})};return {status:200,json:{choices:[{message:{content:JSON.stringify(value)},finish_reason:'stop'}]}};};
+ const answer=await Agent.run('请记两笔：早餐8元、地铁4元，都用微信零钱',{d,book:'daily',vault:vault(),settings,requestUrl,writeAccess:true});
+ assert.equal(answer.status,'error');assert.match(answer.message,/明确要求新增 2 笔/);assert.equal(answer.items,undefined);assert.equal(d.entries.length,0);assert.ok(calls<=5);
+});
 test('Agent uses queried accounts and returns a creation preview without writing',async()=>{const d=ledger(),request=scripted({type:'tool',name:'accounts',arguments:{}},{type:'tool',name:'create_entry',arguments:raw()});const p=await Agent.run('记10月12日Mac mini M6，9900元，微信零钱付款',{d,book:'daily',vault:vault(),settings,requestUrl:request,writeAccess:true});assert.equal(p.status,'preview');assert.equal(p.items[0].amount,990000);assert.equal(d.entries.length,0);});
 test('Agent provides real dates and account IDs; notes require an explicit read',async()=>{for(const includeNotes of [false,true]){const d=ledger();seed(d,{note:'售后电话12345'});const request=scripted({type:'tool',name:'rows',arguments:{start:'2026-10-01',end:'2026-10-31',includeNotes}},body=>{const all=JSON.stringify(body.messages);assert.ok(all.includes('2026-10-12'));assert.ok(all.includes('accountId'));assert.equal(all.includes('售后电话12345'),includeNotes);return {type:'finish',message:'已按账目核对。'};});const a=await Agent.run('这笔的日期和备注是什么',{d,book:'daily',vault:vault(),settings,requestUrl:request,writeAccess:true});assert.equal(a.status,'done');}});
 test('pending creation history retains full proposed values and accepts explicit replacement metadata',()=>{const H=require('../src/ai-agent-history'),d=ledger(),a=plan(d);a.status='preview';const turn={book:'daily',question:'帮我记一笔',answer:a};const r=H.read([turn],{turn:1,limit:8000});assert.ok(r.data.text.includes('990000'));assert.ok(r.data.text.includes('wallet'));const next=E.preview(d,'daily','create_entry',{...raw({amount:980000}),replacesTurn:1});assert.equal(next.items[0].amount,980000);assert.equal(next.items[0].replacesTurn,undefined);assert.throws(()=>E.preview(d,'daily','create_entry',{...raw(),replacesTurn:0}),/轮次/);});

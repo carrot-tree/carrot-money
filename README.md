@@ -4,7 +4,7 @@
 
 [下载最新版](https://github.com/carrot-tree/carrot-money/releases/latest) · [更新记录](CHANGELOG.md)
 
-![Carrot 记账主页，演示数据](https://raw.githubusercontent.com/carrot-tree/carrot-money/v0.54.0/docs/images/overview-054.png)
+![Carrot 记账主页，演示数据](https://raw.githubusercontent.com/carrot-tree/carrot-money/v0.54.1/docs/images/overview-0541.png)
 
 ## 记账与看账
 
@@ -16,11 +16,11 @@
 
 ## 更清楚、更好操作的记账界面
 
-保留柔雾紫和纸页绿两套主题，统一导航图标与操作层级，放大说明文字和图表刻度。自选强调色会自动调整文字和按钮的明暗关系。编辑时保存操作常驻底部，输入错误会定位到字段并保留草稿。
+柔雾紫使用柔和紫粉底色、三色金额卡片与彩色 Emoji 导航；纸页绿保持简洁的纸页质感。自选强调色会自动调整文字和按钮的明暗关系。编辑时保存操作常驻底部，分类列表可独立滚动；金额错误在字段旁清楚显示，并保留输入。
 
-![纸页绿深色，清晰的金额和文字](https://raw.githubusercontent.com/carrot-tree/carrot-money/v0.54.0/docs/images/paper-dark-054.png)
+![纸页绿深色，清晰的金额和文字](https://raw.githubusercontent.com/carrot-tree/carrot-money/v0.54.1/docs/images/paper-dark-0541.png)
 
-![金额错误就地提示，保存操作常驻底部](https://raw.githubusercontent.com/carrot-tree/carrot-money/v0.54.0/docs/images/entry-form-054.png)
+![新增记账，保存操作常驻底部](https://raw.githubusercontent.com/carrot-tree/carrot-money/v0.54.1/docs/images/entry-form-0541.png)
 
 设计检查参考 [UI UX Pro Max](https://github.com/nextlevelbuilder/ui-ux-pro-max-skill)，按中文 Obsidian 记账场景适配，保留用户自选分类 Emoji。
 
@@ -74,7 +74,7 @@
 
 ## 安装与更新
 
-1. 从 [Releases](https://github.com/carrot-tree/carrot-money/releases/latest) 下载 `Carrot-Money-0.54.0.zip`。
+1. 从 [Releases](https://github.com/carrot-tree/carrot-money/releases/latest) 下载 `Carrot-Money-0.54.1.zip`。
 2. 将压缩包中的 `carrot-money` 文件夹放入库的 `.obsidian/plugins/`。
 3. 在 Obsidian「设置 → 第三方插件」启用「Carrot 记账」。更新已安装版本后，重新加载该插件。
 
@@ -95,10 +95,10 @@ npm test
 npm run build
 ```
 
-源码位于 `src/`，构建入口为 `build.js`，发布运行文件为 `main.js`。当前包含80个源码模块、19个测试文件、354项自动回归。
+源码位于 `src/`，构建入口为 `build.js`，发布运行文件为 `main.js`。当前包含80个源码模块、19个测试文件、363项自动回归。
 
-0.54.0 在独立虚构 Obsidian 库中检查13页、两套主题与明暗模式，覆盖375/768/1024/1440宽度、键盘操作、触控尺寸模拟、减少动态效果和桌面200%缩放。本轮聚焦界面，未调用真实模型服务。
+0.54.1 的发布候选通过363项自动回归。真实 OpenCode Go（DeepSeek V4.1 Flash）用虚构账本验证了两笔预览、确认、撤销、Mac mini 单笔取消，以及保存关闭 AI 服务后的会话同步。
 
-上一版0.53.0 使用真实 OpenCode Go（DeepSeek V4.1 Flash）验证具体清单、自然追问和旧断点恢复；在独立虚构 Obsidian 库中完成6组定向界面验收，以及真实模型预览、确认和撤销。桌面模拟宽度覆盖1440、1024、720、390；真实手机、iPad、系统文件选择器和其他模型服务商未在本轮验收。
+本版外观候选由独立审查员在原生 Obsidian 中检查，页面截图与运行文件哈希有记录；最终业务测试使用实际插件流程和内存账本适配器。最终协调者原生窗口连接超时，新增删除焦点与 Enter 保存未补做完整原生点击验收。真实手机、iPad及完整键盘遍历未验证，不把桌面宽度模拟当作真机验收。
 
-[详细验证范围](https://github.com/carrot-tree/carrot-money/blob/v0.54.0/docs/verification.md)
+[详细验证范围](https://github.com/carrot-tree/carrot-money/blob/v0.54.1/docs/verification.md)

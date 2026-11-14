@@ -1,5 +1,17 @@
 'use strict';
 const C=require('./core'),Icons=require('./category-icons');
+// A transaction row shows the original cash movement, even when its source is
+// a consumption projection that allocates later refunds to the purchase date.
+function cashAmount(t){
+ if(t.kind==='legacy'){const parts=[];if(t.legacyIncome!=null)parts.push('收入 ¥ '+C.money(t.legacyIncome));if(t.legacyExpense!=null)parts.push('支出 ¥ '+C.money(t.legacyExpense));return {text:parts.join(' / ')||'金额未注明',tone:'balance'};}
+ const sign=t.kind==='transfer'?'↔ ':t.kind==='expense'||t.amount<0?'− ':t.amount>0?'+ ':'',unit=t.currency==='CNY'?'¥ ':t.currency+' ';
+ return {text:sign+unit+C.money(Math.abs(t.amount)),tone:t.kind==='expense'?'expense':t.kind==='income'?'income':'balance'};
+}
+function compactMoney(cents){
+ const amount=Math.abs(cents)/100,rounded=amount>=100?Number(amount.toPrecision(2)):amount;
+ for(const [scale,unit]of [[1e12,'万亿'],[1e11,'千亿'],[1e8,'亿'],[1e7,'千万'],[1e4,'万'],[1e3,'千']])if(rounded>=scale)return Number((rounded/scale).toPrecision(2))+unit;
+ return String(rounded);
+}
 function sorted(rows,mode='date-desc'){
  const date=(a,b)=>!a.date?(!b.date?0:1):!b.date?-1:(mode==='date-asc'?a.date.localeCompare(b.date):b.date.localeCompare(a.date));
  return [...rows].sort(mode.startsWith('amount-')?(a,b)=>(mode==='amount-asc'?1:-1)*(Math.abs(C.base(a))-Math.abs(C.base(b)))||date(a,b):date);
@@ -30,4 +42,4 @@ function costSummary(parent,d,t,el){
  for(const [label,value]of [['原付',s.paid],['已退',s.refund],...(s.reimbursement?[['已报销',s.reimbursement]]:[]),['净支出',s.net]]){const item=el(fields,'div');el(item,'dt','cm-muted',label);el(item,'dd','',t.currency+' '+C.money(value));}
  el(box,'small','cm-muted','退款 / 报销回冲原消费日；原始金额和流水日期保留。');return s;
 }
-module.exports={render,sorted,chips,changeMonth,deletePlan,deleteEntry,batchEntries,costSummary};
+module.exports={render,sorted,chips,changeMonth,deletePlan,deleteEntry,batchEntries,costSummary,cashAmount,compactMoney};

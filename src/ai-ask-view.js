@@ -3,6 +3,18 @@ const C=require('./core'),Ask=require('./ai-ask'),Tasks=require('./ai-ask-tasks'
 const examples=['这个月吃饭花了多少','上个月哪几笔最大','这个月比上个月多花了多少','本月按分类支出排名','本月日均支出','查重复','生成本月分析报告','把 7 月其他的分类全部改成正餐'];
 function sessionStore(v){const store=v.p.sessions,vault=v.p.store?.vault||v.app?.vault;return store?.vault===vault?store:null;}
 function session(turns=[],input='',title='新会话'){const at=new Date().toISOString();return {id:C.uid(),title,createdAt:at,updatedAt:at,turns,input};}
+function available(v){try{return Agent.eligible('',v.d.settings,{force:true})&&!!Remote.validateConfig(Remote.config(v.d.settings));}catch{return false;}}
+// Session consent is separate from the saved service switch. Revoking service
+// access must stop every open conversation without discarding its draft/history.
+function syncAvailability(v){
+ if(available(v))return;
+ for(const [key,s]of v.askStates||[]){
+  if(!key.startsWith('ai:')||!s.enabled)continue;
+  s.controller?.abort();s.controller=null;s.generation++;s.busy=false;s.enabled=false;s.agreed=false;
+  s.error='AI 服务已关闭或配置不可用。可前往设置中心检查，或使用顶部「本地快捷查询」。';
+  const turn=s.turns.at(-1);if(turn?.answer.status==='working')turn.answer={...turn.answer,ok:false,status:'stopped',message:'AI 服务设置已变化，本轮已停止。聊天和已保存的复核进度仍保留。'};
+ }
+}
 function stateFor(v,mode='local'){v.askStates||=new Map();const key=mode==='ai'?'ai:'+v.book:v.book;if(!v.askStates.has(key))v.askStates.set(key,{input:'',open:mode==='local'&&(v.contentEl?.clientWidth||1000)>720,busy:false,turns:[],generation:0,mode,enabled:false,agreed:false,error:''});const s=v.askStates.get(key);if(mode==='ai')s.book=v.book;if(mode==='ai'&&!s.sessions){const saved=sessionStore(v)?.get(v.book);s.sessions=saved?.sessions?.length?saved.sessions.map(x=>({...x,turns:x.turns.map(t=>({...t,source:t.sourceRevision===v.d.revision?v.d:null}))})):[session(s.turns,s.input,s.turns[0]?.question.slice(0,32)||'新会话')];s.sessionId=saved?.activeId||s.sessions[0].id;const active=s.sessions.find(x=>x.id===s.sessionId)||s.sessions[0];s.sessionId=active.id;s.turns=active.turns;s.input=active.input||'';}return s;}
 const redraw=v=>{if(!v.aiClosed&&!v.p.aiUnloaded)v.render();};
 function touchSession(s){const active=s.sessions?.find(x=>x.id===s.sessionId);if(active)active.updatedAt=new Date().toISOString();}
@@ -27,13 +39,14 @@ async function deleteSession(v,id){
 async function clear(v,mode='local'){const s=stateFor(v,mode);s.controller?.abort();s.generation++;s.turns=[];s.undo=null;s.input='';s.busy=false;s.error='';s.chatPositions={};s.chatFingerprints={};s.chatUnread=false;s.reviewIndex=null;s.reviewOpen=false;if(mode==='ai'){const active=s.sessions.find(x=>x.id===s.sessionId);active.title='新会话';await persist(v,s);}redraw(v);}
 async function dispose(v){const jobs=[];for(const [key,s]of v.askStates||[]){s.controller?.abort();s.generation++;clearTimeout(s.saveTimer);if(s.sessions)jobs.push(persist(v,s,key.slice(3)));}v.askStates?.clear();await Promise.all(jobs);}
 function agree(v,value){const s=stateFor(v,'ai');if(!s.enabled)s.agreed=value===true;redraw(v);}
-function toggleAI(v){const s=stateFor(v,'ai');if(s.enabled){s.controller?.abort();s.generation++;s.busy=false;s.enabled=false;s.agreed=false;s.error='';s.open=false;stateFor(v).open=true;}else{if(!s.agreed){s.error='要先勾选「我了解并同意」。';redraw(v);return false;}let available=false;try{available=Agent.eligible('',v.d.settings,{force:true});if(available)Remote.validateConfig(Remote.config(v.d.settings));}catch{available=false;}if(!available){s.error='请先在设置里开启 AI 服务、Agent 并填写模型服务商和 API Key。';redraw(v);return false;}s.enabled=true;s.error='';s.open=true;}redraw(v);return s.enabled;}
+function toggleAI(v){const s=stateFor(v,'ai');if(s.enabled){s.controller?.abort();s.generation++;s.busy=false;s.enabled=false;s.agreed=false;s.error='';s.open=false;stateFor(v).open=true;}else{if(!s.agreed){s.error='要先勾选「我了解并同意」。';redraw(v);return false;}if(!available(v)){s.error='请先在设置里开启 AI 服务、Agent 并填写模型服务商和 API Key。';redraw(v);return false;}s.enabled=true;s.error='';s.open=true;}redraw(v);return s.enabled;}
 function moveToAI(v,question){if(v.navigate&&v.tab!=='assistant'){v.tab='assistant';}const s=stateFor(v,'ai');s.input=String(question||'');s.open=true;redraw(v);v.contentEl?.querySelector('.cm-ask-ai-input')?.focus({preventScroll:true});}
 async function submit(v,question,{mode='local',requestUrl,now,clearInput=false,resumeReviewId,resumeCandidateId,resumeReportPath,workflowRef,workflowContext,workflowMode}={}){
+ if(mode==='ai')syncAvailability(v);
  if(mode==='ai'&&!requestUrl)requestUrl=v.assistantRequest||v.p._requestUrl;
  const s=stateFor(v,mode);if(s.busy)return;
  const text=String(question||'').trim();if(!text)return;
- if(mode==='ai'&&!s.enabled){s.error='要先阅读风险说明、勾选同意并开启 AI 提问。';redraw(v);return;}
+ if(mode==='ai'&&!s.enabled){s.error=s.error||'要先阅读发送范围、勾选同意并开启 AI 管账；本地查询可直接使用顶部「本地快捷查询」。';redraw(v);return;}
  s.error='';
  if(mode==='ai'&&!workflowRef&&await require('./ai-findings-view').followup(v,text)){if(clearInput)s.input='';await persist(v,s);redraw(v);return;}
  const book=v.book,sessionId=s.sessionId,data=v.d,settings=C.clone(data.settings),signature=JSON.stringify(Remote.config(settings)),generation=++s.generation;
@@ -116,6 +129,7 @@ function drill(v,turn,fact){
 async function copyReply(v,turn){try{await Reply.copy(turn.answer.message,v.clipboard);turn.copyStatus='已复制回答';}catch(e){turn.copyStatus='复制失败，请选中文字后复制：'+(e.message||'剪贴板不可用');}redraw(v);}
 function renderSessions(v,p,{el,btn},s){const bar=el(p,'div','cm-agent-sessions');const label=el(bar,'label','cm-field');el(label,'span','cm-label','当前会话');const select=el(label,'select');select.setAttribute('aria-label','AI 会话');for(const item of s.sessions){const option=el(select,'option','',item.title+' · '+item.turns.length+' 轮');option.value=item.id;}select.value=s.sessionId;select.disabled=s.busy;select.addEventListener('change',()=>selectSession(v,select.value));btn(bar,'新建会话',()=>newSession(v),'cm-ghost').disabled=s.busy;const history=el(p,'details','cm-agent-history');el(history,'summary','','历史会话 · '+s.sessions.length+' 个');const title=el(history,'input');title.type='text';title.value=s.sessions.find(x=>x.id===s.sessionId).title;title.maxLength=80;title.setAttribute('aria-label','会话名称');title.disabled=s.busy;title.addEventListener('change',()=>renameSession(v,title.value));for(const item of [...s.sessions].sort((a,b)=>b.updatedAt.localeCompare(a.updatedAt)))btn(history,item.title+' · '+item.turns.length+' 轮'+(item.id===s.sessionId?' · 当前':''),()=>selectSession(v,item.id),'cm-link').disabled=s.busy;el(p,'p','cm-muted','会话保存在本地，可切换后继续提问；清除对话只清空当前会话。');if(s.storageError||sessionStore(v)?.error)el(p,'p','cm-error',s.storageError||sessionStore(v).error);}
 function renderBoard(v,p,H,mode){
+ if(mode==='ai')syncAvailability(v);
  const {el,btn}=H,s=stateFor(v,mode),ai=mode==='ai',drawer=el(p,'details','cm-card cm-ask-drawer '+(ai?'cm-ask-ai':'cm-ask-local'));drawer.open=s.open;
  el(drawer,'summary','',ai?'🤖 AI 提问 · Agent 模式':'💬 本地提问 · 推荐，不联网');drawer.addEventListener('toggle',()=>{s.open=drawer.open;});
  const content=el(drawer,'div','cm-ask-content');
@@ -198,4 +212,4 @@ function renderTurns(v,history,H,mode,{chronological=false,workspace=false}={}){
  }
 }
 function render(v,p,H){renderBoard(v,p,H,'local');renderBoard(v,p,H,'ai');}
-module.exports={examples,stateFor,submit,clear,dispose,persist,newSession,selectSession,renameSession,agree,toggleAI,moveToAI,drill,stale,confirm,undo,openReport,copyReply,render,renderBoard,renderTurns,scheduleSave,archiveSession,deleteSession,touchSession,cancel,confirmSelected};
+module.exports={examples,stateFor,syncAvailability,submit,clear,dispose,persist,newSession,selectSession,renameSession,agree,toggleAI,moveToAI,drill,stale,confirm,undo,openReport,copyReply,render,renderBoard,renderTurns,scheduleSave,archiveSession,deleteSession,touchSession,cancel,confirmSelected};

@@ -1,7 +1,7 @@
 'use strict';
 const CategoryIcons=require('./category-icons');
 const C=require('./core'),A=require('./analytics');
-const EMPTY='按这些条件没算到',NEEDS_AI='这个问题需要开启 AI 服务才能解析';
+const EMPTY='没有找到符合条件的账目',NEEDS_AI='这个问题需要开启 AI 服务才能解析';
 const keys=['start','end','metric','dimension','operation','sort','limit','filters'];
 const dimensions=['none','category','account','person','tag','entry'];
 const own=(x,k)=>Object.prototype.hasOwnProperty.call(x,k);
