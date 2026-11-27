@@ -1,6 +1,6 @@
 'use strict';
 const CategoryIcons=require('./category-icons');
-const C=require('./core'),Controls=require('./controls');
+const C=require('./core'),Controls=require('./controls'),A=require('./analytics');
 // Display descriptors only. Actual filtering remains in reports.rangeFilter/core.filter.
 function appliedFilters(d,state){
  const items=[];
@@ -15,6 +15,7 @@ function render(v,p,H){const {el,btn,select}=H,state=v.report;
  const box=el(p,'section','cm-card cm-report-toolbar');
  const quick=el(box,'div','cm-report-quick-ranges');for(const [mode,name]of [['month','按月看'],['year','按年看'],['last12','近 12 个月'],['custom','自定义']]){const b=btn(quick,name,()=>{state.mode=mode;v.render();},'cm-filter-chip'+(state.mode===mode?' active':''));b.setAttribute('aria-pressed',String(state.mode===mode));}
  btn(quick,'回到本月',()=>{v.month=C.today().slice(0,7);state.mode='month';v.render();},'cm-link');
+ if(A.canTruncate(state.mode,v.month||C.today().slice(0,7))){const span=el(quick,'span','cm-report-toggle');span.setAttribute('role','group');span.setAttribute('aria-label','统计截止');for(const [flag,name]of [[true,'截至今天'],[false,state.mode==='year'?'完整年份':'完整月份']]){const on=(state.toDate!==false)===flag,b=btn(span,name,()=>{state.toDate=flag;v.render();},'cm-filter-chip'+(on?' active':''));b.setAttribute('aria-pressed',String(on));}}
  const bar=el(box,'div','cm-report-range-row');
  const anchor=el(bar,'div','cm-field');anchor.addClass('cm-report-month-field');el(anchor,'span','cm-label',state.mode==='year'?'基准年份':'基准月份');Controls.monthPicker(anchor,v.month||C.today().slice(0,7),value=>{v.month=value;v.render();},'报表基准月份',{mode:state.mode});
  if(state.mode==='custom'){

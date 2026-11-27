@@ -55,7 +55,7 @@ function derive(plan,turns=[]){
   if(step.invalidated){state.status='undone';state.reason='本步骤或前置步骤的结果已撤销，请重新核对';}
   const previouslyExecuted=turns.slice(0,turnIndex<0?0:turnIndex).some(t=>t?.book===plan.book&&t.workflow?.id===plan.id&&t.workflow.stepId===step.id&&t.phase==='done'&&t.receipt?.book===plan.book&&count(t.receipt.count)>0);
   if(previouslyExecuted&&!['done','undone','partial'].includes(state.status))state.reason='此前已确认过操作，已有结果保留；'+state.reason;
-  const blockedBy=step.dependsOn.filter(id=>steps.find(s=>s.id===id)?.status!=='done');
+  const blockedBy=step.dependsOn.filter(id=>!['done','skipped'].includes(steps.find(s=>s.id===id)?.status));
   if(step.skipped&&state.status!=='working'&&state.status!=='preview'&&state.status!=='done'){state.status='skipped';state.reason=state.executed||previouslyExecuted?'剩余内容已跳过，已执行操作保留':'用户已跳过这一步';}
   if(blockedBy.length&&!['done','working','preview','undone','skipped'].includes(state.status)){state.status='blocked';state.reason='等待前置步骤确认完成：'+blockedBy.map(id=>steps.find(s=>s.id===id)?.title||id).join('、');}
   const canRun=!plan.cancelled&&!blockedBy.length&&!step.skipped&&['pending','partial','needs_input','error','stopped','cancelled','undone'].includes(state.status);
@@ -81,7 +81,7 @@ function context(plan,step,turns=[]){
   const item=r.item?(require('./ai-subscriptions').names.has(r.name)&&r.item.entry?require('./ai-subscriptions').describe(r.item):{id:r.id||r.item.id,name:String(r.item.name||'').slice(0,80),type:r.item.type,currency:r.item.currency}):undefined;
   data.confirmed.push({turn:index+1,stepId:t.workflow.stepId,phase:t.phase,name:r.name||r.action,count:r.count,created:item,undone:t.undoResult?{restored:count(t.undoResult.restored),skipped:count(t.undoResult.skipped)}:undefined});
  }
- data.confirmed=data.confirmed.slice(-12);data.instructions='这只是任务进度，不是新的写入授权。只能处理当前步骤；先查最新账本，每次修改仍须用户确认。只有实际回执是已执行，部分执行及跳过不算全部完成。历史明细请用conversation_history回查，不猜测ID。';
+ data.confirmed=data.confirmed.slice(-12);data.instructions='这只是任务进度，不是新的写入授权。只能处理当前步骤；先查最新账本，每次修改仍须用户确认。只有实际回执是已执行，部分执行及跳过不算全部完成。如果前置步骤被用户跳过，明确说明缺少该结果；必要时先向用户确认，不复用假定结果。历史明细请用conversation_history回查，不猜测ID。';
  let output=JSON.stringify(data);while(output.length>MAX_CONTEXT&&data.confirmed.length){data.confirmed.shift();data.earlierReceiptsOmitted=true;output=JSON.stringify(data);}if(output.length>MAX_CONTEXT)throw Error('任务上下文超过上限');return output;
 }
 module.exports={MAX_CONTEXT,create,validate,locate,derive,next,context,skip,cancel};

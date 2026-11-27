@@ -28,7 +28,7 @@ async function open(v,mode,ids,H){
    if(done)return;let currentDrafts=drafts;
    const check=()=>{if(mode==='delete'&&draftMemory(p)!==memoryStamp)throw Error('AI 草稿已变化，请关闭后重新预览');};
    const beforeCommit=mode==='delete'?async()=>{currentDrafts=await draftReferences(p);if(JSON.stringify(currentDrafts)!==draftStamp)throw Error('AI 草稿已变化，请关闭后重新预览');check();}:undefined;
-   try{const result=await p.change(d=>Tools.apply(d,plan,currentDrafts),{snapshot:true,check,beforeCommit});done=true;status.textContent=`已${mode==='delete'?'删除':'补全'} ${plan.count} 个分类。账目仍为 ${p.data.entries.length} 笔。恢复快照：${result.snapshot}`;confirm.hidden=true;v.render();}catch(e){status.textContent='未执行：'+e.message;}
+   try{const result=await p.change(d=>Tools.apply(d,plan,currentDrafts),{snapshot:true,check,beforeCommit});done=true;status.textContent=`已${mode==='delete'?'删除':'补全'} ${plan.count} 个分类。账目仍为 ${p.data.entries.length} 笔。恢复快照：${result.snapshot}`;confirm.hidden=true;}catch(e){status.textContent='未执行：'+e.message;}
   },'mod-cta');confirm.disabled=!plan.count;
  };modal.onClose=()=>modal.contentEl.empty();modal.open();return modal;
 }

@@ -17,10 +17,11 @@ async function run(requestUrl,extra={}){
 }
 
 for(const status of [400,401,402,403,404,405,408,409,415,422,429]){
- test(`HTTP ${status} ends the turn after exactly one request`,async()=>{
+ const attempts=[408,429].includes(status)?3:1;
+ test(`HTTP ${status} ends the turn after ${attempts} request(s)`,async()=>{
   let calls=0;
   const answer=await run(async()=>{calls++;return {status,json:{error:{message:'fictional private response body'}}};});
-  assert.equal(calls,1);assert.equal(answer.status,'error');assert.equal(answer.ok,false);
+  assert.equal(calls,attempts);assert.equal(answer.status,'error');assert.equal(answer.ok,false);
   assert.match(answer.message,new RegExp('HTTP '+status));assert.doesNotMatch(answer.message,/fictional private response body/);
   assert.match(answer.message,/本轮没有执行账本修改/);assert.equal(answer.steps.length,0);
  });
@@ -56,8 +57,8 @@ test('persistent server failures stop after three requests',async()=>{
 
 test('a permanent failure on a retry stops without spending the last request',async()=>{
  let calls=0;
- const answer=await run(async()=>({status:++calls===1?503:429}));
- assert.equal(calls,2);assert.equal(answer.status,'error');assert.match(answer.message,/HTTP 429/);
+ const answer=await run(async()=>({status:++calls===1?503:403}));
+ assert.equal(calls,2);assert.equal(answer.status,'error');assert.match(answer.message,/HTTP 403/);
 });
 
 test('malformed JSON retains its bounded correction request',async()=>{

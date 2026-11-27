@@ -32,5 +32,18 @@ const manual={
 };
 function catalog(writeAccess=true){return {supported:supported.filter(x=>writeAccess||!x.tools.some(t=>['create_entry','create_entries','set_budget','plan_tasks','propose_change','create_category','create_account','delete_entries','subscriptions','plans'].includes(t))),manual,confirmation:'账本修改须先预览，再由用户确认；订阅只是本地续费计划，不办理商家退订。'};}
 function result(code='other'){if(!manual[code]||code==='other')return {ok:false,intent:'agent',status:'unsupported',unsupported:'other',message:'当前没有与这项请求对应的操作工具，本次未执行。请说明要处理的对象和具体动作，我会核对可用能力；也可到设置中心查看功能入口。',manualAction:{tab:'settings',label:'打开设置中心'}};const x=manual[code];return {ok:false,intent:'agent',status:'unsupported',unsupported:manual[code]?code:'other',message:`目前 AI 对话还不能${x.label==='这项操作'?'执行这项操作':x.label}。本次没有执行这项操作。\n\n请前往「${x.route}」办理。`,manualAction:x.tab?{tab:x.tab,label:'打开'+x.route}:undefined};}
-function infer(name){if(/^(?:get|list|read|query|search|show|check)_/.test(name)){if(/goal|saving/.test(name))return 'goal_read';if(/balance/.test(name))return 'account_balance';}if(/post_due|settle|skip/.test(name))return 'plan_settle';if(/budget/.test(name))return 'budget_write';if(/goal|saving/.test(name))return 'goal_write';if(/installment/.test(name))return 'installment_write';if(/import/.test(name))return 'import_bill';if(/refund|reimburse/.test(name))return 'refund_link';if(/account|balance|reconcile/.test(name))return 'account_write';if(/category|book/.test(name))return 'category_manage';if(/restore|backup|reset/.test(name))return 'restore_data';if(/setting|theme/.test(name))return 'settings_write';if(/cancel_subscription|merchant/.test(name))return 'merchant_subscription';if(/subscription|rule|recurring/.test(name))return 'recurring_write';if(/bank|sync/.test(name))return 'bank_connection';if(/entry|entries|transaction/.test(name))return 'entry_create';return 'other';}
+function infer(name){
+ if(/^(?:get|list|read|query|search|show|check)_/.test(name)){
+  if(/goal|saving/.test(name))return 'goal_read';
+  if(/trash|deleted|reports/.test(name))return 'history_read';
+ }
+ for(const [pattern,key] of [
+  [/post_due|settle|skip/,'plan_settle'],[/goal|saving/,'goal_write'],[/installment/,'installment_write'],
+  [/import/,'import_bill'],[/refund|reimburse/,'refund_link'],[/account|balance|reconcile/,'account_write'],
+  [/category|book/,'category_manage'],[/restore|backup|reset/,'restore_data'],[/setting|theme/,'settings_write'],
+  [/cancel_subscription|merchant/,'merchant_subscription'],[/subscription|rule|recurring/,'recurring_write'],
+  [/bank|sync/,'bank_connection']
+ ])if(pattern.test(name))return key;
+ return 'other';
+}
 module.exports={supported,manual,catalog,result,infer};

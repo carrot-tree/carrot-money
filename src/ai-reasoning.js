@@ -22,6 +22,7 @@ function parse(payload){
  }
  return sanitize(caps);
 }
+const openAIReasoning=model=>/^(?:openai\/)?(?:o1|o3|o4-mini|gpt-5)(?:$|[-.])/.test(String(model||'').toLowerCase());
 function support(c){
  const entry=P.catalogFor(c.modelCatalog,c.presetId,c.baseUrl),hit=sanitize(entry?.reasoning)[c.model];
  let host='';try{host=new URL(c.baseUrl).hostname;}catch{}
@@ -30,6 +31,8 @@ function support(c){
  if(hit)return {...hit,format:deep&&hit.format==='effort'?'deepseek':hit.format,levels:deep&&hit.format==='effort'?['none',...hit.levels.filter(x=>x!=='none')]:hit.levels,source:'服务商模型列表'};
  const info=(format,levels)=>({format,levels,source:'内置官方说明（2026-09-30）'});
  if(['api.xiaomimimo.com','token-plan-cn.xiaomimimo.com'].includes(host)&&/^mimo-v2\.(?:6-(?:flash|pro|pro-ultraspeed)|5(?:-pro)?)$/.test(model))return info('thinking',['enabled','disabled']);
+ if(openAIReasoning(model))return info('effort',['low','medium','high']);
+ if(/^(?:deepseek\/)?deepseek-reasoner$/.test(model))return info('',[]);
  if(host==='api.deepseek.com'&&/^(deepseek-flash|deepseek-v4(?:\.1)?-(?:flash|pro))$/.test(model))return info('deepseek',['none','low','high','max']);
  if(host==='generativelanguage.googleapis.com'&&/^gemini-3\.(?:8|7)-flash$/.test(model))return info('effort',['low','medium','high']);
  if(host==='generativelanguage.googleapis.com'&&/^gemini-3-pro-preview$/.test(model))return info('effort',['low','high']);
@@ -49,8 +52,9 @@ function body(c,value){
  if(effort){if(cap.format==='thinking')out.thinking={type:effort};else if(cap.format==='boolean')out.enable_thinking=effort==='enabled';else if(cap.format==='deepseek'){out.thinking={type:effort==='none'?'disabled':'enabled'};if(effort!=='none')out.reasoning_effort=effort;}else out.reasoning_effort=effort;}
  // MiMo's compatible API uses the completion budget for thinking + final text.
  let host='';try{host=new URL(c.baseUrl).hostname;}catch{}
- if(['api.xiaomimimo.com','token-plan-cn.xiaomimimo.com','api.minimax.io'].includes(host)&&out.max_tokens!==undefined){out.max_completion_tokens=out.max_tokens;delete out.max_tokens;}
- if(effort&&effort!=='none'&&effort!=='disabled'){delete out.temperature;delete out.top_p;}
+ const openAI=openAIReasoning(c.model||out.model);
+ if((openAI||['api.xiaomimimo.com','token-plan-cn.xiaomimimo.com','api.minimax.io'].includes(host))&&out.max_tokens!==undefined){out.max_completion_tokens=out.max_tokens;delete out.max_tokens;}
+ if(openAI||/^(?:deepseek\/)?deepseek-reasoner$/i.test(c.model)||effort&&effort!=='none'&&effort!=='disabled'){delete out.temperature;delete out.top_p;}
  return out;
 }
 module.exports={labels,sanitize,parse,support,validate,body};

@@ -40,9 +40,9 @@ async function run(question,{d,book,range,settings,cfg,history=[],preferences=[]
     if(cfg.agentShowSentFields)state.sentFields.push({attempt:state.sentFields.length+1,fields:['原问题与最多2轮简短对话','当前账本分类和启用偏好','本批账单ID、日期、标题、商户、备注、分类、金额、币种及汇率'],toolResults:state.toolCalls});
     const controller=new AbortController(),abort=()=>controller.abort();signal?.addEventListener('abort',abort,{once:true});const timer=setTimeout(abort,Math.max(1,deadline-clock()));
     try{
-     const r=await Remote.completion({...remote,timeoutSeconds:Math.min(remote.timeoutSeconds,Math.max(1,Math.ceil((deadline-clock())/1000)))},{model:remote.model,stream:false,temperature:0,max_tokens:Math.min(cfg.agentMaxOutputTokens,12000),messages},requestUrl,{signal:controller.signal});check();
-     for(const [k,wire]of [['promptTokens','prompt_tokens'],['completionTokens','completion_tokens'],['totalTokens','total_tokens']])state.usage[k]+=Number(r.usage?.[wire]||0);if(Object.keys(r.usage||{}).length)state.usage.reported=true;
-     if(r.finishReason==='length'){job.batchSize=Math.max(1,Math.floor(page.rows.length/2));page=batch(rows,job.offset,job.batchSize);throw Error('本批输出被截断，已缩小批量，请用简短依据重新核对');}const value=parseJSON(r.content);
+     const r=await Remote.completion({...remote,timeoutSeconds:Math.min(remote.timeoutSeconds,Math.max(1,Math.ceil((deadline-clock())/1000)))},{model:remote.model,stream:false,temperature:0,max_tokens:Math.min(cfg.agentMaxOutputTokens,12000),messages},requestUrl,{signal:controller.signal,shouldContinue:()=>shouldContinue()&&clock()<deadline});check();
+     Remote.trackUsage(state.usage,r);
+     if(r.finishReason==='length')throw Error('本批输出被截断，已缩小批量，请用简短依据重新核对');const value=parseJSON(r.content);
      if(!value||Array.isArray(value)||Object.keys(value).some(k=>k!=='findings')||!Array.isArray(value.findings))throw Error('本批只接受findings数组');
      const ids=new Set(page.rows.map(t=>t.id));if(value.findings.some(f=>!ids.has(f?.id)))throw Error('建议只能引用本批已读记录');
      Findings.validate(value.findings,d,book,[range]);for(const row of page.rows.filter(t=>t.truncatedFields?.length)){const f=value.findings.find(f=>f.id===row.id);if(!f||f.confidence!=='uncertain'||!f.question)throw Error('正文截断的记录必须标记待核实并询问补充内容');}

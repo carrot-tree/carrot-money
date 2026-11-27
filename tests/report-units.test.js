@@ -44,6 +44,29 @@ test('real report facts cover statistics, budgets, subscriptions, anomalies and 
  assert.equal(JSON.stringify(raw),before);assert.equal(JSON.stringify(d),ledgerBefore);
 });
 
+test('refund, reimbursement and net amounts use original currency and fractional major units',()=>{
+ const raw=Report.facts(ledger(),'daily','2024-02','支出复盘');
+ const item=Report.modelFacts(raw).largestTransactions.rows.find(row=>row.id==='expense');
+ assert.deepEqual([item.refundedAmount,item.reimbursedAmount,item.netAmount],['¥10.00','¥5.00','¥35.00']);
+ const [fx]=Report.modelFacts([{currency:'USD',refundedAmount:123,reimbursedAmount:500,netAmount:700,baseAmount:5040}]);
+ assert.deepEqual([fx.refundedAmount,fx.reimbursedAmount,fx.netAmount,fx.baseAmount],['USD 1.23','USD 5.00','USD 7.00','¥50.40']);
+ assert.deepEqual(Tools.references([{currency:'USD',refundedAmount:123,baseAmount:886}]).原币金额,['USD 1.23']);
+});
+
+test('a fenced report JSON reply saves on the first request',async()=>{
+ const d=ledger(),v=vault();let calls=0;
+ const result=await Report.run('生成2024-02分析报告',options(d,v,async()=>{
+  calls++;
+  const reply=response('## 收入分析\n\n本月收入 ¥200.00。');
+  const message=reply.json.choices[0].message;
+  message.content='\x60\x60\x60json\n'+message.content+'\n\x60\x60\x60';
+  return reply;
+ }));
+ assert.equal(result.status,'done');
+ assert.equal(calls,1);
+ assert.match(v.files.get(result.path.replace(/\.html$/,'.md')),/收入 ¥200\.00/);
+});
+
 test('report sends formatted facts and unit instructions while evidence still validates original cents',async()=>{
  const d=ledger(),before=JSON.stringify(d),v=vault();let captured,calls=0;
  const result=await Report.run('生成2024-02分析报告',options(d,v,async request=>{
@@ -88,9 +111,10 @@ test('resuming a partial report uses display units and preserves previously save
 });
 
 for(const status of [400,408,415,429]){
- test(`report HTTP ${status} stops after the first request`,async()=>{
+ const attempts=[408,429].includes(status)?3:1;
+ test(`report HTTP ${status} stops after ${attempts} request(s)`,async()=>{
   let calls=0;const v=vault(),result=await Report.run('生成2024-02分析报告',options(ledger(),v,async()=>{calls++;return {status};}));
-  assert.equal(calls,1);assert.equal(result.status,'error');assert.match(result.message,new RegExp('HTTP '+status));assert.equal(result.path,undefined);
+  assert.equal(calls,attempts);assert.equal(result.status,'error');assert.match(result.message,new RegExp('HTTP '+status));assert.equal(result.path,undefined);
  });
 }
 

@@ -25,13 +25,13 @@ function advance(d,r){
  }
  if(r.remaining===0)r.enabled=false;
 }
-function budgetPace(d,b,anchor,at=C.today()){
- const use=C.budgetUsage(d,b,anchor),totalDays=days(use.start,use.end)+1;
+function budgetPace(d,b,anchor,at=C.today(),spending=C.spendingIndex(d,b.book)){
+ const use=C.budgetUsage(d,b,anchor,spending),totalDays=days(use.start,use.end)+1;
  const phase=at<use.start?'future':at>use.end?'past':'current';
  const elapsed=phase==='past'?totalDays:phase==='future'?0:days(use.start,at)+1;
  const remainingDays=phase==='past'?0:phase==='future'?totalDays:days(at,use.end)+1;
  // 未来日期的账目不代表今天已花掉的金额，进度比较仅取截至今天。
- const spentToDate=phase==='future'?0:C.totals(C.consumption(d,{book:b.book,category:b.category,start:use.start,end:at<use.end?at:use.end})).expense;
+ const spentToDate=phase==='future'?0:spending(b.category,use.start,at<use.end?at:use.end);
  const expected=Math.round(b.amount*elapsed/totalDays),ahead=phase==='current'&&spentToDate>expected;
  return {...use,totalDays,elapsed,remainingDays,phase,spentToDate,expected,ahead,daily:remainingDays?Math.floor(Math.max(0,use.left)/remainingDays):0};
 }

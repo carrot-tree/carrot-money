@@ -1,4 +1,5 @@
 'use strict';
+const {version}=require('../manifest.json');
 // User-supplied endpoints and suggested model IDs. This is the only preset
 // catalogue; suggestions are editable and do not imply live availability.
 const presets=Object.freeze([
@@ -48,7 +49,7 @@ function clearKeys(draft,id){
 function localHost(host){
  const h=host.toLowerCase().replace(/^\[|\]$/g,'');if(h==='localhost'||h==='::1')return 'loopback';
  const parts=h.split('.');if(parts.length===4&&parts.every(x=>/^\d+$/.test(x)&&Number(x)<=255)){
-  const [a,b]=parts.map(Number);if(a===127)return 'loopback';if(a===10||a===192&&b===168||a===172&&b>=16&&b<=31||a===169&&b===254)return 'lan';
+  const [a,b]=parts.map(Number);if(a===127)return 'loopback';if(a===10||a===192&&b===168||a===172&&b>=16&&b<=31)return 'lan';
  }
  if(/^(?:f[cd][0-9a-f]{2}|fe[89ab][0-9a-f]):/i.test(h))return 'lan';return '';
 }
@@ -82,6 +83,6 @@ function rememberCatalog(catalog,presetId,{baseUrl,models,at,reasoning}={}){
 }
 function isGo(url){try{const u=new URL(url);return u.protocol==='https:'&&u.hostname==='opencode.ai'&&/^\/(?:zen|inference)\/go(?:\/|$)/.test(u.pathname);}catch{return false;}}
 const sessionId=value=>typeof value==='string'&&/^[a-zA-Z0-9_-]{1,128}$/.test(value)?value:require('./core').uid();
-function goHeaders(url,id){return isGo(url)?{'User-Agent':'carrot-money/0.54.1','x-opencode-session':sessionId(id)}:{};}
-function headers(c,{sessionId}={}){let host='';try{host=new URL(c.baseUrl).hostname;}catch{}return {...(['api.xiaomimimo.com','token-plan-cn.xiaomimimo.com'].includes(host)?{'api-key':c.apiKey}:{Authorization:'Bearer '+c.apiKey}),...goHeaders(c.baseUrl,sessionId)};}
+function goHeaders(url,id){return isGo(url)?{'User-Agent':'carrot-money/'+version,'x-opencode-session':sessionId(id)}:{};}
+function headers(c,{sessionId}={}){let host='';try{host=new URL(c.baseUrl).hostname;}catch{}const auth=c.apiKey?(['api.xiaomimimo.com','token-plan-cn.xiaomimimo.com'].includes(host)?{'api-key':c.apiKey}:{Authorization:'Bearer '+c.apiKey}):{};return {...auth,...goHeaders(c.baseUrl,sessionId)};}
 module.exports={headers,isGo,sessionId,goHeaders,presets,DEFAULT,get,infer,restore,remember,select,clearKeys,localHost,target,sanitizeCatalog,catalogFor,rememberCatalog,catalogUrl};

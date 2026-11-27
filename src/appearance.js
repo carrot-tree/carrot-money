@@ -1,4 +1,5 @@
 'use strict';
+const IO=require('./vault-io');
 const ROOT='Carrot记账',PATH=ROOT+'/外观.json';
 const presets={mist:{name:'柔雾紫',description:'柔和紫调 · 清晰层次 · 轻盈圆角',accent:'#a65de8',radius:20},paper:{name:'纸页绿',description:'暖白纸面 · 墨绿细线 · 清晰账目',accent:'#2d6657',radius:12}};
 const rgb=hex=>[1,3,5].map(i=>parseInt(hex.slice(i,i+2),16));
@@ -15,7 +16,7 @@ function apply(root,p){const settings=current(p);if(!Object.hasOwn(p,'appearance
 function refresh(p,patch={}){if(Object.hasOwn(p,'appearanceRoots'))for(const root of [...p.appearanceRoots]){if(root.isConnected)apply(root,p);else p.appearanceRoots.delete(root);}const value=current(p);if(Object.hasOwn(p,'appearanceRoots'))for(const root of p.appearanceRoots){for(const button of root.querySelectorAll('[data-appearance-style]')){const selected=button.dataset.appearanceStyle===value.style;button.classList.toggle('is-selected',selected);button.setAttribute('aria-pressed',String(selected));}for(const control of root.querySelectorAll('[data-appearance-field]')){const key=control.dataset.appearanceField;if(key in patch||patch.style&&(key==='accent'||key==='radius'))control.value=value[key]??presets[value.style][key];}}}
 class AppearanceStore{
  constructor(vault){this.vault=vault;this.data=null;this.raw=null;this.error='';this.queue=Promise.resolve();}
- async load(){try{if(await this.vault.adapter.exists(PATH)){const raw=await this.vault.adapter.read(PATH),data=validate(JSON.parse(raw));this.raw=raw;this.data=data;}this.error='';}catch(e){this.error='读取外观设置失败：'+e.message;}return this.data;}
- save(value){const copy=validate({...value,version:1});const job=this.queue.then(async()=>{if(this.error)throw Error(this.error);const exists=await this.vault.adapter.exists(PATH),raw=exists?await this.vault.adapter.read(PATH):null;if(raw!==this.raw)throw Error('外观已在其他窗口更新，请重开插件后继续');const text=JSON.stringify(copy,null,2);if(!await this.vault.adapter.exists(ROOT))await this.vault.createFolder(ROOT);if(exists)await this.vault.process(this.vault.getAbstractFileByPath(PATH),before=>{if(before!==raw)throw Error('外观保存时出现外部更新');return text;});else await this.vault.create(PATH,text);this.raw=text;this.data=copy;});this.queue=job.catch(()=>{});return job;}
+ load(){return IO.load(this,PATH,()=>null,raw=>validate(JSON.parse(raw)),'外观设置');}
+ save(value){const copy=validate({...value,version:1});const job=this.queue.then(async()=>{if(this.error)throw Error(this.error);const raw=await IO.read(this.vault,PATH);if(raw!==this.raw)throw Error('外观已在其他窗口更新，请重新读取本地设置后继续');const text=JSON.stringify(copy,null,2);await IO.mkdir(this.vault,ROOT);await IO.write(this.vault,PATH,text,raw);this.raw=text;this.data=copy;});this.queue=job.catch(()=>{});return job;}
 }
 module.exports={AppearanceStore,PATH,presets,validate,current,apply,refresh,colorTokens,contrast};

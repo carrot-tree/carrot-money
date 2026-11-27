@@ -274,7 +274,7 @@ function preview(d,book,value){
  const months=[...new Set(rows.map(t=>t.date.slice(0,7)))];
 
  const selected=new Set(ids);
- if([...d.entries,...d.trash].some(t=>['refund','reimbursement'].includes(t.kind)&&selected.has(t.id)!==selected.has(t.related)))throw Error('关联退款或报销须与原支出一起选择，请重新核对相关记录');
+ if(categoryActions.has(task.action)&&[...d.entries,...d.trash].some(t=>['refund','reimbursement'].includes(t.kind)&&selected.has(t.id)!==selected.has(t.related)))throw Error('关联退款或报销须与原支出一起选择，请重新核对相关记录');
  const draft=C.clone(d);for(const t of [...draft.entries,...draft.trash])if(selected.has(t.id)){const change=applyChange(t,task);t[change.field]=Array.isArray(change.newVal)?C.clone(change.newVal):change.newVal;}C.validate(draft);C.validateChanges(d,draft);
 
  const actionName=getTitleActionName(task.action);
@@ -288,11 +288,11 @@ function preview(d,book,value){
  return {ok:true,intent:'action',task,book,ids,signatures,locations,linkedCount,trashCount,count:rows.length,amount,accounts,months,rows:displayRows,actionName,message:rows.length?`打算修改 ${task.start} 至 ${task.end} 匹配的 ${primaryCount} 笔记录`+(linkedCount?`，同时同步 ${linkedCount} 笔关联退款/报销`:'')+(trashCount?`（其中回收站 ${trashCount} 笔，仍保留在回收站）`:''):'没有符合条件的记录',facts:[]};
 }
 
-function allRows(d,plan){return plan.ids.map((id,i)=>{const t=JSON.parse(plan.signatures[i]),values=applyChange(t,plan.task),location=plan.locations?.[i]||'entries',linked=i>=plan.count-(plan.linkedCount||0);return {id,date:t.date,title:(t.payee||t.title||'未命名账目')+(location==='trash'?'（回收站 · 关联'+C.kinds[t.kind]+'）':linked?'（关联'+C.kinds[t.kind]+'）':''),content:t.title||t.note||'',amount:t.amount,currency:t.currency,oldStr:formatValue(plan.task,values.oldVal,d),newStr:formatValue(plan.task,values.newVal,d),reason:plan.task.changes?.find(x=>x.id===id)?.reason||plan.task.reason||'',categoryId:categoryActions.has(plan.task.action)?values.newVal:undefined,location};});}
+function allRows(d,plan){if(!plan.signatures)return plan.rows||[];return plan.ids.map((id,i)=>{const t=JSON.parse(plan.signatures[i]),values=applyChange(t,plan.task),location=plan.locations?.[i]||'entries',linked=i>=plan.count-(plan.linkedCount||0);return {id,date:t.date,title:(t.payee||t.title||'未命名账目')+(location==='trash'?'（回收站 · 关联'+C.kinds[t.kind]+'）':linked?'（关联'+C.kinds[t.kind]+'）':''),content:t.title||t.note||'',amount:t.amount,currency:t.currency,oldStr:formatValue(plan.task,values.oldVal,d),newStr:formatValue(plan.task,values.newVal,d),reason:plan.task.changes?.find(x=>x.id===id)?.reason||plan.task.reason||'',categoryId:categoryActions.has(plan.task.action)?values.newVal:undefined,location};});}
 function withSelection(d,plan,ids){
  if(!Array.isArray(ids)||!ids.length||new Set(ids).size!==ids.length||ids.some(id=>!plan.ids.includes(id)))throw Error('请选择预览内的记录');
  const fresh=preview(d,plan.book,plan.task);if(JSON.stringify(fresh.ids)!==JSON.stringify(plan.ids)||JSON.stringify(fresh.signatures)!==JSON.stringify(plan.signatures)||JSON.stringify(fresh.locations)!==JSON.stringify(plan.locations||plan.ids.map(()=>'entries')))throw changed();
- const selected=new Set(ids);if([...d.entries,...d.trash].some(t=>['refund','reimbursement'].includes(t.kind)&&selected.has(t.id)!==selected.has(t.related)))throw Error('关联退款或报销须一起选择');
+ const selected=new Set(ids);if(categoryActions.has(plan.task.action)&&[...d.entries,...d.trash].some(t=>['refund','reimbursement'].includes(t.kind)&&selected.has(t.id)!==selected.has(t.related)))throw Error('关联退款或报销须一起选择');
  return {...plan,selectionIds:plan.ids.filter(id=>selected.has(id))};
 }
 function retarget(d,plan,id,to){
@@ -324,13 +324,16 @@ function apply(d,plan){
 
 function undo(d,receipt){
  const ids=new Set(receipt.ids);let restored=0,skipped=0;
+ const indexes=Object.fromEntries(['entries','trash'].map(key=>[key,new Map(d[key].filter(t=>t.book===receipt.book).map(t=>[t.id,t]))]));
+ const row=change=>indexes[change.location||'entries']?.get(change.id);
  const blocked=new Set();if(categoryActions.has(receipt.action)){
-  const eligible=new Set(receipt.changes.filter(change=>d[change.location||'entries']?.some(t=>t.id===change.id&&t.book===receipt.book&&t.category===change.new)).map(x=>x.id));
+  const eligible=new Set(receipt.changes.filter(change=>row(change)?.category===change.new).map(x=>x.id));
   for(const t of [...d.entries,...d.trash])if(['refund','reimbursement'].includes(t.kind)&&(ids.has(t.id)||ids.has(t.related))&&(!eligible.has(t.id)||!eligible.has(t.related)))blocked.add(t.related);
  }
+ const activeReturns=new Map();for(const t of d.entries)if(['refund','reimbursement'].includes(t.kind)){if(!activeReturns.has(t.related))activeReturns.set(t.related,[]);activeReturns.get(t.related).push(t);}
  const FIELD={set_categories:'category',set_category:'category',reassign_category:'category',set_category_by_keyword:'category',add_tag:'tags',remove_tag:'tags',set_account:'account',set_method:'account',set_person:'person',mark_reimbursable:'reimbursable',set_note_prefix:'note',set_amount:'amount',set_date:'date'};
  for(const change of receipt.changes){
-  const t=d[change.location||'entries']?.find(x=>x.id===change.id&&x.book===receipt.book);
+  const t=row(change);
   if(!t){skipped++;continue;}
   if(blocked.has(t.related||t.id)){skipped++;continue;}
   let matches=false;
@@ -346,6 +349,12 @@ function undo(d,receipt){
 
   const field=change.field||FIELD[receipt.action];
   if(!field){skipped++;continue;}
+  const returned=activeReturns.get(t.id)||[];
+  const original=indexes.entries.get(t.related);
+  if(field==='date'&&(returned.some(r=>r.date<change.old)||original&&original.date>change.old)||
+     field==='amount'&&t.kind==='expense'&&returned.reduce((sum,r)=>sum+r.amount,0)>change.old||
+     field==='amount'&&original&&(activeReturns.get(original.id)||[]).reduce((sum,r)=>sum+(r.id===t.id?change.old:r.amount),0)>original.amount||
+     field==='reimbursable'&&!change.old&&returned.some(r=>r.kind==='reimbursement')){skipped++;continue;}
   if(change.hadOld===false)delete t[field];   // 原来没有这个字段，撤销要还原成"没有"，不能塞空值
   else t[field]=change.old;
 

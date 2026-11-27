@@ -193,18 +193,18 @@ function nearby(a,b){
  const time=t=>t.importTime?.startsWith(t.date+'T')?Date.parse(t.importTime+'Z'):NaN;
  const ta=time(a),tb=time(b);return Number.isFinite(ta)&&Number.isFinite(tb)?Math.abs(ta-tb)<=NEAR_MS:a.date===b.date;
 }
-function validateEntry(d,t){
+function validateEntry(d,t,links){
  // Keep only the relations needed by this entry. Full-ledger validation happens
  // once at commit; validating all history for every preview row is quadratic.
- const related=t.related?d.entries.filter(x=>x.id===t.related||x.related===t.related):[];
+ const original=t.related&&links.originals.get(t.related)?.entry,related=original?[original,...(links.returns.get(t.related)||[])]:[];
  C.validate({...d,entries:[...related,C.clone(t)],trash:[],rules:[],templates:[],budgets:[],goals:[],imports:[]});
 }
-function assess(row,d,index){
+function assess(row,d,index,links){
  const t=row.entry,issues=[],blockers=[],reasons=[...row.reasons];
  const issue=(code,why,block=false)=>{issues.push(code);reasons.push(why);if(block)blockers.push(why);};
  if(row.edited)issue('edited','已编辑的记录请逐条或多选核实确认');
  if(!C.validDate(t.date))issue('date',row.record.dateRaw?'日期无法识别，请核实':'缺少日期，请补充',true);
- if(/[ T]\d{2}:/.test(row.record.dateRaw)&&!row.record.time)issue('time','原交易时间无法识别，请核实日期与重复线索');
+ if(/[ T]\d{1,2}:/.test(row.record.dateRaw)&&!row.record.time)issue('time','原交易时间无法识别，请核实日期与重复线索');
  if(!Number.isSafeInteger(t.amount))issue('amount','金额缺失或无法识别，请补充',true);
  else if(t.amount<=0)issue('amount','金额为零或负数，请核实原始方向和金额',true);
  else if(t.amount>=LARGE_AMOUNT)issue('large','单笔达到 100,000 元，请核实');
@@ -217,43 +217,67 @@ function assess(row,d,index){
  }
  if(!d.accounts.some(a=>a.id===t.account&&!a.archived))issue('account','请选择可用账户',true);
  const category=d.categories.find(c=>c.id===t.category&&!c.archived);
- if(!category)issue('category','请选择现有'+(t.kind==='income'?'收入':'支出')+'分类',true);
- else if(['income','expense'].includes(t.kind)&&category.type!==t.kind)issue('category-type','分类的收支类型不匹配，请重新选择',true);
+ if(t.kind!=='transfer'&&!category)issue('category','请选择现有'+(t.kind==='income'?'收入':'支出')+'分类',true);
+ else if(['income','expense'].includes(t.kind)&&category?.type!==t.kind)issue('category-type','分类的收支类型不匹配，请重新选择',true);
  if(!C.currencies.includes(t.currency))issue('currency','请选择支持的币种',true);
  else if(t.currency!=='CNY'&&!row.fxReviewed)issue('currency','外币账目请先编辑并确认币种与折算人民币汇率',true);
  if(!Number.isFinite(t.rate)||t.rate<=0||t.currency==='CNY'&&t.rate!==1)issue('rate','请填写有效的折算人民币汇率（1 单位原币）',true);
  const crossSheet=(index.orders.get(t.externalId)||[]).filter(x=>t.externalId&&(t.importSource==='sheet'||x.t.importSource==='sheet'));
- const exact=[...new Set([...(index.exact.get(t.id)||[]),...(index.exact.get(identity(t))||[]),...crossSheet])].filter(x=>x.key!==row.key);
+ const legacy=(index.exact.get(row.record.legacyId)||[]).filter(x=>x.location!=='本批次'&&x.t.book===t.book&&x.t.kind===t.kind&&x.t.title===t.title);
+ const exact=[...new Set([...(index.exact.get(t.id)||[]),...(index.exact.get(identity(t))||[]),...crossSheet,...legacy])].filter(x=>x.key!==row.key);
  // Same order in the batch stays visible. One may be posted; subsequent attempts
  // are blocked by the fresh ledger index instead of silently dropping records.
  if(exact.length)issue('duplicate','相同订单 / 导入标识已在'+[...new Set(exact.map(x=>x.location))].join('、'),exact.some(x=>x.location!=='本批次'));
  const who=clean(t.payee||t.title),bucket=[t.book,t.currency,Math.abs(t.amount),who].join('|');
  const suspects=(index.similar.get(bucket)||[]).filter(x=>x.key!==row.key&&x.t.id!==t.id&&nearby(t,x.t));
  if(suspects.length)issue('suspect','疑似重复：同金额、同商户、相近时间（仅有日期时按同日比较）');
- if(!blockers.length){try{validateEntry(d,t);}catch(e){issue('validation',e.message,true);}}
+ if(!blockers.length){try{validateEntry(d,t,links);}catch(e){issue('validation',e.message,true);}}
  if(row.flags?.length)issue('ai-flag','AI 疑点：'+row.flags.map(flagLabel).join('、')+(row.advice?'；修正建议：'+row.advice:''));
  const actionIssues=issues.filter(code=>code!=='status');
  const confidence=level(Math.min(row.score,actionIssues.length?.7:1));
  const unrecognized=!C.validDate(t.date)||!Number.isSafeInteger(t.amount)||row.nature==='unknown';
  return {issues,blockers,reasons:[...new Set(reasons)],confidence,group:unrecognized?'unknown':confidence==='high'&&!actionIssues.length?'ready':'review',duplicates:[...exact,...suspects].map(x=>({id:x.t.id,title:x.t.title,date:x.t.date,amount:x.t.amount,location:x.location}))};
 }
-function originals(batch,d,row){const seen=new Set(d.entries.map(t=>t.id));return [...d.entries.filter(t=>t.book===batch.book&&t.kind==='expense').map(t=>({entry:t,source:'账本',key:''})),...batch.rows.filter(r=>r.key!==row.key&&r.state==='pending'&&r.entry.kind==='expense'&&r.entry.book===batch.book&&!seen.has(r.entry.id)).map(r=>({entry:r.entry,source:'本批待核实',key:r.key}))];}
-function linkedData(batch,d,row){if(!['refund','reimbursement'].includes(row.entry.kind)||!row.entry.related||d.entries.some(t=>t.id===row.entry.related))return d;const original=originals(batch,d,row).find(x=>x.entry.id===row.entry.related);return original?{...d,entries:[...d.entries,original.entry]}:d;}
-function inheritOriginal(batch,d,row){if(!['refund','reimbursement'].includes(row.entry.kind))return;const original=originals(batch,d,row).find(x=>x.entry.id===row.entry.related)?.entry;if(original){for(const k of ['category','currency','rate'])row.entry[k]=original[k];row.fxReviewed=true;}}
-function refresh(batch,d){const index=duplicateIndex(d,batch);for(const row of batch.rows)if(row.state==='pending'){if(row.refundMatch&&row.refundMatch.expenseId!==row.entry.related)delete row.refundMatch;inheritOriginal(batch,d,row);Object.assign(row,assess(row,linkedData(batch,d,row),index));}return batch;}
+function originalIndex(batch,d){
+ const seen=new Set(d.entries.map(t=>t.id)),originals=new Map(),returns=new Map();
+ for(const t of d.entries){
+  if(t.book!==batch.book)continue;
+  if(t.kind==='expense')originals.set(t.id,{entry:t,source:'账本',key:''});
+  if(['refund','reimbursement'].includes(t.kind)&&t.related){
+   if(!returns.has(t.related))returns.set(t.related,[]);
+   returns.get(t.related).push(t);
+  }
+ }
+ for(const r of batch.rows)if(r.state==='pending'&&r.entry.kind==='expense'&&r.entry.book===batch.book&&!seen.has(r.entry.id)&&!originals.has(r.entry.id))originals.set(r.entry.id,{entry:r.entry,source:'本批待核实',key:r.key});
+ return {originals,returns};
+}
+function originals(batch,d,row){return [...originalIndex(batch,d).originals.values()].filter(x=>x.key!==row.key);}
+function inheritOriginal(row,links){
+ if(!row.entry.related||!['refund','reimbursement'].includes(row.entry.kind))return;
+ const original=links.originals.get(row.entry.related)?.entry;
+ if(original){for(const k of ['category','currency','rate'])row.entry[k]=original[k];row.fxReviewed=true;}
+}
+function refresh(batch,d){
+ const index=duplicateIndex(d,batch),links=originalIndex(batch,d);
+ for(const row of batch.rows)if(row.state==='pending'){
+  if(row.refundMatch&&row.refundMatch.expenseId!==row.entry.related)delete row.refundMatch;
+  inheritOriginal(row,links);Object.assign(row,assess(row,d,index,links));
+ }
+ return batch;
+}
 function edit(batch,key,values,d){
  const row=batch.rows.find(r=>r.key===key);if(!row||!['pending','skipped'].includes(row.state))throw Error('这笔记录已处理');
  if(!Object.hasOwn(natureNames,values.nature))throw Error('请选择交易性质');
  const t=C.clone(row.entry);for(const k of ['date','category','account','toAccount','related','note','title'])if(values[k]!==undefined)t[k]=String(values[k]).trim();
  t.amount=values.amount===''?null:C.cents(values.amount);t.kind=values.nature==='repayment'?'transfer':values.nature;
- const original=['refund','reimbursement'].includes(t.kind)?originals(batch,d,row).find(x=>x.entry.id===t.related)?.entry:null;
+ const original=t.related&&['refund','reimbursement'].includes(t.kind)?originalIndex(batch,d).originals.get(t.related)?.entry:null;
  if(original){t.category=original.category;t.currency=original.currency;t.rate=original.rate;}
  else{
   if(values.currency!==undefined){if(!C.currencies.includes(values.currency))throw Error('请选择支持的币种');t.currency=values.currency;}
   if(t.currency==='CNY')t.rate=1;else if(values.rate!==undefined){t.rate=Number(String(values.rate).trim());if(!Number.isFinite(t.rate)||t.rate<=0)throw Error('请填写有效的折算人民币汇率');}
  }
  t.toAmount=values.toAmount?C.cents(values.toAmount):0;
- if(t.kind!=='transfer'){t.toAccount='';t.toAmount=0;}else if(d.accounts.find(a=>a.id===t.toAccount)?.currency===t.currency)t.toAmount=t.amount;
+ if(t.kind!=='transfer'){t.toAccount='';t.toAmount=0;}else{t.category='';if(d.accounts.find(a=>a.id===t.toAccount)?.currency===t.currency)t.toAmount=t.amount;}
  if(!['refund','reimbursement'].includes(t.kind))t.related='';
  if(t.date!==row.entry.date)t.importTime='';
  if(!row.edited)row.reasons=row.reasons.map(x=>'原识别：'+x);
@@ -269,11 +293,18 @@ function setCategories(batch,keys,categoryId,d){
 }
 function counts(batch){const result={total:batch.rows.length,ready:0,review:0,unknown:0,confirmed:0,skipped:0,excluded:0,flagged:0};for(const r of batch.rows){result[r.state==='pending'?r.group:r.state]++;if(r.state==='pending'&&r.flags?.length)result.flagged++;}return result;}
 function preflight(d,batch,keys,{highOnly=false}={}){
- const selected=new Set(keys),index=duplicateIndex(d,batch),rows=batch.rows.filter(r=>selected.has(r.key));
- const blocked=rows.map(row=>{const checked=assess(row,linkedData(batch,d,row),index),original=row.entry.related?originals(batch,d,row).find(x=>x.entry.id===row.entry.related&&x.key):null;if(original&&!selected.has(original.key))checked.blockers.push('请同时选择本批原支出「'+original.entry.title+'」入账');return {row,...checked};}).filter(x=>x.blockers.length||highOnly&&x.group!=='ready');
- let error=rows.length!==selected.size||rows.some(r=>r.state!=='pending')?'所选记录已变化，请重新选择':'';
- if(!error&&!blocked.length){try{const copy=C.clone(d);post(copy,batch,keys,{highOnly});}catch(e){error=e.message;}}
- return {rows,blocked,error,ok:!!rows.length&&!blocked.length&&!error};
+ const selected=new Set(keys),index=duplicateIndex(d,batch),links=originalIndex(batch,d),rows=batch.rows.filter(r=>selected.has(r.key));
+ const checks=rows.map(row=>({row,...assess(row,d,index,links)})),blockedKeys=new Set(checks.filter(x=>x.blockers.length||highOnly&&x.group!=='ready').map(x=>x.row.key));
+ for(const x of checks){
+  const original=x.row.entry.related&&links.originals.get(x.row.entry.related);
+  if(original?.key&&(!selected.has(original.key)||blockedKeys.has(original.key))){
+   x.blockers.push('请同时选择可入账的本批原支出「'+original.entry.title+'」');blockedKeys.add(x.row.key);
+  }
+ }
+ const blocked=checks.filter(x=>blockedKeys.has(x.row.key)),allowed=rows.filter(r=>!blockedKeys.has(r.key)).map(r=>r.key);
+ let error=rows.length!==selected.size||keys.length!==selected.size||rows.some(r=>r.state!=='pending')?'所选记录已变化，请重新选择':'';
+ if(!error&&allowed.length)try{post({...d,imports:[...d.imports]},batch,allowed,{highOnly});}catch(e){error=e.message;}
+ return {rows,blocked,allowed:error?[]:allowed,error,ok:!!allowed.length&&!blocked.length&&!error};
 }
 function post(d,batch,keys,{highOnly=false}={}){
  if(C.activeBook(d)!==batch.book)throw Error('默认账本已切换，请回到原账本后确认');
@@ -281,8 +312,8 @@ function post(d,batch,keys,{highOnly=false}={}){
  const selected=new Set(keys);if(!selected.size)throw Error('请先选择记录');
  const rows=batch.rows.filter(r=>selected.has(r.key));if(rows.length!==selected.size||rows.some(r=>r.state!=='pending'))throw Error('所选记录已变化，请重新选择');
  const previous=d.imports.find(x=>x.id===batch.id);if(previous&&!previous.undoable)throw Error('该批次已撤销，请重新导入');
- const index=duplicateIndex(d,batch),entries=[];
- for(const row of rows){const original=row.entry.related?originals(batch,d,row).find(x=>x.entry.id===row.entry.related&&x.key):null;if(original&&!selected.has(original.key))throw Error('请同时选择本批原支出「'+original.entry.title+'」入账');const check=assess(row,linkedData(batch,d,row),index);if(check.blockers.length)throw Error((row.entry.title||'这笔账目')+'：'+check.blockers.join('；'));if(highOnly&&check.group!=='ready')throw Error('部分记录已不再是高置信，请刷新复核');entries.push(C.clone(row.entry));}
+ const index=duplicateIndex(d,batch),links=originalIndex(batch,d),entries=[];
+ for(const row of rows){const original=row.entry.related&&links.originals.get(row.entry.related);if(original?.key&&!selected.has(original.key))throw Error('请同时选择本批原支出「'+original.entry.title+'」入账');const check=assess(row,d,index,links);if(check.blockers.length)throw Error((row.entry.title||'这笔账目')+'：'+check.blockers.join('；'));if(highOnly&&check.group!=='ready')throw Error('部分记录已不再是高置信，请刷新复核');entries.push(C.clone(row.entry));}
  // Validate the entire group before touching the supplied draft, including two
  // selected rows with one order ID or several refunds exceeding the original.
  const next=C.clone(d);next.entries.push(...entries);C.validate(next);
@@ -292,4 +323,4 @@ function post(d,batch,keys,{highOnly=false}={}){
 }
 function markPosted(batch,keys){const set=new Set(keys);for(const row of batch.rows)if(set.has(row.key))row.state='confirmed';}
 function undo(d,batchId){const history=d.imports.find(b=>b.id===batchId&&b.source==='ai-import');if(!history?.undoable)throw Error('该批次已撤销或不存在');C.removeEntries(d,history.ids);history.undoable=false;}
-module.exports={originals,readFile,analyze,localProvider,accountHint:account,nature,level,refresh,edit,setState,setCategories,counts,post,preflight,markPosted,undo,natureNames,groupNames,confidenceNames,flagNames,flagLabel,flagKey,LARGE_AMOUNT,NEAR_MS};
+module.exports={originals,originalIndex,readFile,analyze,localProvider,accountHint:account,nature,level,refresh,edit,setState,setCategories,counts,post,preflight,markPosted,undo,natureNames,groupNames,confidenceNames,flagNames,flagLabel,flagKey,LARGE_AMOUNT,NEAR_MS};

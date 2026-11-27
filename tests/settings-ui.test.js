@@ -3,7 +3,7 @@ const test=require('node:test'),assert=require('node:assert/strict'),Module=requ
 const notices=[],originalLoad=Module._load;
 Module._load=function(id,...args){if(id==='obsidian')return {Notice:class{constructor(message){notices.push(message);}}};return originalLoad.call(this,id,...args);};
 const UI=require('../src/ai-settings');Module._load=originalLoad;
-const Remote=require('../src/ai-provider'),Models=require('../src/ai-models'),C=require('../src/core'),{Store}=require('../src/storage');
+const Remote=require('../src/ai-provider'),Models=require('../src/ai-models'),Presets=require('../src/ai-presets'),C=require('../src/core'),{Store}=require('../src/storage');
 class Element{
  constructor(tag='div',options={}){this.tag=tag;this.children=[];this.textContent=options.text||'';this.classes=new Set((options.cls||'').split(' ').filter(Boolean));this.isConnected=true;this.attributes={};this.classList={add:(...names)=>names.forEach(name=>this.classes.add(name)),toggle:(name,on)=>{if(on)this.classes.add(name);else this.classes.delete(name);}};}
  createEl(tag,options={}){const child=new Element(tag,options);child.parent=this;this.children.push(child);return child;}
@@ -33,19 +33,25 @@ function setup(extra={}){
  rows.length=0;notices.length=0;
  const p={data:{settings:{aiEnhancement:Remote.validateConfig(Remote.config({aiEnhancement:{enabled:true,presetId:'custom',baseUrl:'https://fictional.invalid/v1',apiKey:'fictional-key-for-tests',model:'fictional-model',agentEnabled:true,...extra}}))}},writes:0};
  p.change=async fn=>{const next=JSON.parse(JSON.stringify(p.data));fn(next);p.data=next;p.writes++;};
+ p.clearAIKeys=async(id,{check})=>{check();Presets.clearKeys(p.data.settings.aiEnhancement,id);p.writes++;};
  const root=new Element(),controller=UI.render(root,p,{Setting});
  return {p,root,controller,row:name=>rows.find(row=>row.name===name),button:text=>rows.flatMap(row=>row.controls).find(control=>control.text===text),input:name=>rows.find(row=>row.name===name)?.controls.find(control=>control.kind==='text'),draft:()=>root.all().find(el=>el.classes.has('cm-ai-settings-draft')).textContent,result:()=>root.all().find(el=>el.classes.has('cm-ai-settings-result')).textContent};
 }
 function stub(t,owner,key,fn){const old=owner[key];owner[key]=fn;t.after(()=>{if(old===undefined)delete owner[key];else owner[key]=old;});}
 function deferred(){let resolve;const promise=new Promise(done=>{resolve=done;});return {promise,resolve};}
-function storagePausedAtBackup(view){
+function storagePausedBeforeCommit(view,{clearing=false}={}){
  const data=C.blank();data.settings={...data.settings,...view.p.data.settings};
  let disk=JSON.stringify(data),writes=0;const before=disk,entered=deferred(),release=deferred();
- const store=new Store({adapter:{read:async()=>disk},getAbstractFileByPath:path=>({path}),process:async(_file,fn)=>{disk=fn(disk);writes++;}});
+ const store=new Store({adapter:{read:async()=>disk},getAbstractFileByPath:path=>({path}),process:async(_file,fn)=>{disk=fn(disk);writes++;}},{saveData:async()=>{writes++;}});
  store.data=data;store.raw=disk;
  // Exercise the real transaction order while keeping every byte in memory.
  store.backup=async()=>{entered.resolve();await release.promise;return 'fictional-backup';};
+ if(clearing){
+  store.backup=async()=>assert.fail('clearing keys must never back up the ledger');
+  store.scrubCopies=async()=>{entered.resolve();await release.promise;};
+ }
  Object.defineProperty(view.p,'data',{get:()=>store.data});view.p.change=(fn,options)=>store.change(fn,options);
+ view.p.clearAIKeys=(id,options)=>store.clearKeys(id,options);
  return {entered,release,before,disk:()=>disk,writes:()=>writes};
 }
 
@@ -94,9 +100,10 @@ test('busy model reads reject double actions and late results after dispose neve
 });
 
 for(const action of ['保存 AI 设置','清除当前 Key','清除全部 Key','读取模型列表']){
- test(`${action} rechecks a disposed settings view after the backup await`,async t=>{
+ const clearing=action.startsWith('清除');
+ test(`${action} rechecks a disposed settings view after ${clearing?'copy cleanup':'backup'}`,async t=>{
   if(action==='读取模型列表')stub(t,Models,'readModels',async()=>({ok:true,models:['fictional-read-model']}));
-  const x=setup(),disk=storagePausedAtBackup(x);
+  const x=setup(),disk=storagePausedBeforeCommit(x,{clearing});
   if(action==='保存 AI 设置')x.input('模型名').change('edited-before-close');
   const work=x.button(action).click();await disk.entered.promise;
   x.controller.dispose();const noticeCount=notices.length;disk.release.resolve();await work;

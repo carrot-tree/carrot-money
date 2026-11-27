@@ -34,7 +34,7 @@ async function bulkUpdate(v,state,values){
   if(!row.edited)row.reasons=row.reasons.map(x=>'原识别：'+x);row.edited=true;row.reasons.push(nature?'已批量修改交易性质，请核实双方账户':'已批量修改账户，请核实');
  }
  AI.refresh(copy,v.d);
- await Workspace.mutate(v,state,()=>{const changed=new Map(copy.rows.filter(r=>keys.has(r.key)).map(r=>[r.key,r]));state.batch.rows=state.batch.rows.map(r=>changed.get(r.key)||r);state.bulkUndo={kind:'update',batch:state.batch,rows:before,after:new Map(rows.map(r=>[r.key,JSON.stringify(changed.get(r.key))]))};AI.refresh(state.batch,v.d);say(state,'已批量修改 '+rows.length+' 笔草稿'+(nature?'为'+AI.natureNames[nature]:'账户')+'，核实后再确认入账');});
+ await Workspace.mutate(v,state,()=>{const changed=new Map(copy.rows.filter(r=>keys.has(r.key)).map(r=>[r.key,r]));state.batch.rows=state.batch.rows.map(r=>changed.get(r.key)||r);state.bulkUndo={kind:'update',batch:state.batch,rows:before,after:new Map(rows.map(r=>[r.key,JSON.stringify(changed.get(r.key))]))};AI.refresh(state.batch,v.d);say(v,state,'已批量修改 '+rows.length+' 笔草稿'+(nature?'为'+AI.natureNames[nature]:'账户')+'，核实后再确认入账');});
 }
 function bulkForm(v,state,H,nature){
  const batch=state.batch,keys=[...state.selected],accounts=[['','请选择账户'],...v.d.accounts.filter(a=>!a.archived).map(a=>[a.id,a.name])],title=nature?'批量设为'+AI.natureNames[nature]:'批量修改账户';
@@ -42,23 +42,24 @@ function bulkForm(v,state,H,nature){
  const modal=new H.Form(v.p,title+'（'+keys.length+' 笔）',specs,async values=>{if(state.batch!==batch||v.book!==batch.book||keys.length!==state.selected.size||keys.some(k=>!state.selected.has(k)))throw Error('队列或所选记录已变化，请重新打开');await bulkUpdate(v,state,{...values,nature});});modal.open();return modal;
 }
 async function bulkExclude(v,state){const rows=pending(state.batch).filter(r=>state.selected.has(r.key)),count=rows.length;if(!count)return;
- await Workspace.mutate(v,state,()=>{state.bulkUndo={kind:'exclude',batch:state.batch,keys:rows.map(r=>r.key)};for(const row of rows){AI.setState(state.batch,row.key,'excluded');state.selected.delete(row.key);}AI.refresh(state.batch,v.d);say(state,'已排除 '+count+' 笔草稿（所选中已处理的记录已跳过）');});
+ await Workspace.mutate(v,state,()=>{state.bulkUndo={kind:'exclude',batch:state.batch,keys:rows.map(r=>r.key)};for(const row of rows){AI.setState(state.batch,row.key,'excluded');state.selected.delete(row.key);}AI.refresh(state.batch,v.d);say(v,state,'已排除 '+count+' 笔草稿（所选中已处理的记录已跳过）');});
 }
 async function bulkCategory(v,state,categoryId){const rows=pending(state.batch).filter(r=>state.selected.has(r.key));if(!rows.length)return;
- const category=v.d.categories.find(c=>c.id===categoryId&&!c.archived);if(!category){say(state,'请选择现有分类');v.render();return;}
- if(rows.some(r=>category.type!==(r.nature==='income'?'income':'expense'))){say(state,'所选记录含不同收支类型，请分别修改分类');v.render();return;}
+ const category=v.d.categories.find(c=>c.id===categoryId&&!c.archived);if(!category){say(v,state,'请选择现有分类');v.render();return;}
+ if(rows.some(r=>category.type!==(r.nature==='income'?'income':'expense'))){say(v,state,'所选记录含不同收支类型，请分别修改分类');v.render();return;}
  const before=rows.map(r=>({key:r.key,category:r.entry.category,edited:r.edited,reasons:[...r.reasons]}));
- await Workspace.mutate(v,state,()=>{const count=AI.setCategories(state.batch,rows.map(r=>r.key),categoryId,v.d);state.bulkUndo={kind:'category',batch:state.batch,rows:before};say(state,'已修改 '+count+' 笔草稿分类，请核实后再确认');});
+ await Workspace.mutate(v,state,()=>{const count=AI.setCategories(state.batch,rows.map(r=>r.key),categoryId,v.d);state.bulkUndo={kind:'category',batch:state.batch,rows:before};say(v,state,'已修改 '+count+' 笔草稿分类，请核实后再确认');});
 }
 async function undoBulk(v,state){const undo=state.bulkUndo;if(!undo||undo.batch!==state.batch)return;
  await Workspace.mutate(v,state,()=>{let restored=0;if(undo.kind==='exclude')for(const key of undo.keys){const row=state.batch.rows.find(r=>r.key===key);if(row?.state==='excluded'){AI.setState(state.batch,key,'pending');restored++;}}
   else if(undo.kind==='update'){for(const previous of undo.rows){const i=state.batch.rows.findIndex(r=>r.key===previous.key);if(i>=0&&state.batch.rows[i].state==='pending'&&JSON.stringify(state.batch.rows[i])===undo.after.get(previous.key)){state.batch.rows[i]=C.clone(previous);restored++;}}}
   else for(const previous of undo.rows){const row=state.batch.rows.find(r=>r.key===previous.key);if(row?.state==='pending'){row.entry.category=previous.category;row.edited=previous.edited;row.reasons=previous.reasons;restored++;}}
-  AI.refresh(state.batch,v.d);state.bulkUndo=null;say(state,'已撤销 '+restored+' 笔草稿的上次批量操作'+(restored?'':'（记录已处理或变化）'));});
+  AI.refresh(state.batch,v.d);state.bulkUndo=null;say(v,state,'已撤销 '+restored+' 笔草稿的上次批量操作'+(restored?'':'（记录已处理或变化）'));});
 }
 // 识别结果同时写进页面状态与系统提示，避免「点了没反应」这种感受。
 const notify=text=>{try{new (require('obsidian').Notice)(text);}catch{}};
-const say=(state,text)=>{state.enhanceMessage=text;notify(text);};
+const live=v=>!v.aiClosed&&!v.p.aiUnloaded;
+const say=(v,state,text)=>{state.enhanceMessage=text;if(live(v))notify(text);};
 function choose(v){v.contentEl.querySelector('.cm-ai-file')?.click();}
 async function importFile(v,file,H){
  const state=stateFor(v),book=v.book,previous=state.batch;if(state.busy)return;
@@ -86,24 +87,31 @@ async function enhance(v,{requestUrl,repeat=false,scope,keys:onlyKeys}={}){
  try{
   const result=await Remote.enhance(batch,v.d,settings,{requestUrl:requestUrl||v.p._requestUrl,keys,userInitiated:true,signal:controller.signal,shouldContinue:current,onProgress:value=>{if(current())Review.progress(v,state,value);}});
   state.task.remainingKeys=result.failedKeys||keys;Tasks.finish(state,{done:result.enhanced||0,failed:result.fallback??(result.applied===false?keys.length:0),stopped:result.stopped,message:result.stopped?'已完成建议保留，可继续未完成项':'识别结束，请核实结果'});
-  if(result.applied===false)say(state,'AI 识别未执行：'+result.reasons.join('；'));
+  if(result.applied===false)say(v,state,'AI 识别未执行：'+result.reasons.join('；'));
   else{
    await Workspace.persist(v,state);const count=AI.counts(batch);
    const reasons=result.reasons.length?'（'+result.reasons.join('；')+'）':'';
    const slow=/超时/.test(result.reasons.join(' '))?'；慢服务商可在设置 → AI 服务把「单次请求超时」调到 90–120 秒再试':'';
-   say(state,result.stopped?'AI 识别已停止：保留已采纳的 '+result.enhanced+' 笔建议，其余可再次识别；迟到结果不会采用':(result.enhanced?'AI 识别完成：采纳 '+result.enhanced+' 笔，本地回退 '+result.fallback+' 笔'+(count.flagged?'，其中 '+count.flagged+' 笔有疑点待核实':'')+reasons:'AI 未能采纳任何结果，全部保留本地建议：'+result.reasons.join('；'))+slow);
+   say(v,state,result.stopped?'AI 识别已停止：保留已采纳的 '+result.enhanced+' 笔建议，其余可再次识别；迟到结果不会采用':(result.enhanced?'AI 识别完成：采纳 '+result.enhanced+' 笔，本地回退 '+result.fallback+' 笔'+(count.flagged?'，其中 '+count.flagged+' 笔有疑点待核实':'')+reasons:'AI 未能采纳任何结果，全部保留本地建议：'+result.reasons.join('；'))+slow);
   }
  }
- catch(e){Tasks.finish(state,{failed:keys.length,message:'请求未完成，草稿保留'});say(state,'AI 识别失败：'+(e&&e.message?e.message:'未知错误')+'；已保留本地复核队列');}
+ catch(e){Tasks.finish(state,{failed:keys.length,message:'请求未完成，草稿保留'});say(v,state,'AI 识别失败：'+(e&&e.message?e.message:'未知错误')+'；已保留本地复核队列');}
  finally{clearTimeout(timer);if(state.enhanceController===controller)state.enhanceController=null;state.busy=false;state.progress=null;render();}
 }
 function enhanceCandidates(state,{repeat=false,scope=state.enhanceScope||'review'}={}){return state.batch?Remote.candidates(state.batch).filter(r=>scope==='selected'?state.selected.has(r.key):scope==='failed'?r.recognition?.state==='failed':repeat||scope==='all'||r.group!=='ready'&&r.origin!=='ai'&&!r.reasons.some(x=>/^AI 判断：/.test(x))):[];}
-function stop(v){const state=stateFor(v);state.enhanceController?.abort();}
+function stop(v){
+ const drafts=v.p.drafts?.vault===v.p.store?.vault?v.p.drafts:null;
+ const states=new Set([...(drafts?.states?.values()||[]),...(v.aiStates?.values()||[])]);
+ for(const state of states)state.enhanceController?.abort();
+ if(live(v))Workspace.redraw(v);
+}
 async function save(v,state,keys,highOnly=false){
- if(state.busy)throw Error('还有复核操作未结束，请稍后重试');const batch=state.batch;state.busy=true;state.error='';v.render();
- try{Workspace.sync(state,v.d);if(batch.restoreBlocked)throw Error(batch.restoreWarnings.join('；'));if(!await Workspace.persist(v,state))throw Error('草稿尚未保存，本次没有入账；请先重试保存');await v.p.change(d=>{Workspace.sync(state,d);if(batch.restoreBlocked)throw Error(batch.restoreWarnings.join('；'));AI.post(d,batch,keys,{highOnly});});AI.markPosted(batch,keys);for(const key of keys)state.selected.delete(key);const draftSaved=await Workspace.persist(v,state);say(state,'已入账 '+keys.length+' 笔'+(draftSaved?'':'；账目已保存，草稿状态待重试保存'));return keys.length;}
- catch(e){state.error='未入账：'+e.message;notify(state.error);throw Error(state.error);}
- finally{state.busy=false;AI.refresh(batch,v.d);v.render();}
+ if(state.busy)throw Error('还有复核操作未结束，请稍后重试');const batch=state.batch,book=v.book;
+ const verify=()=>{if(!live(v)||v.book!==book||state.batch!==batch)throw Error('复核页面或账本已变化，请重新预览');};
+ state.busy=true;state.error='';v.render();
+ try{verify();Workspace.sync(state,v.d);if(batch.restoreBlocked)throw Error(batch.restoreWarnings.join('；'));if(!await Workspace.persist(v,state))throw Error('草稿尚未保存，本次没有入账；请先重试保存');await v.p.change(d=>{Workspace.sync(state,d);if(batch.restoreBlocked)throw Error(batch.restoreWarnings.join('；'));AI.post(d,batch,keys,{highOnly});},{check:verify});AI.markPosted(batch,keys);for(const key of keys)state.selected.delete(key);const draftSaved=await Workspace.persist(v,state);say(v,state,'已入账 '+keys.length+' 笔'+(draftSaved?'':'；账目已保存，草稿状态待重试保存'));return keys.length;}
+ catch(e){state.error='未入账：'+e.message;if(live(v)){notify(state.error);throw Error(state.error);}return 0;}
+ finally{state.busy=false;if(live(v)){AI.refresh(batch,v.d);v.render();}}
 }
 function confirm(v,state,keys,H,highOnly=false){
  if(!keys.length||state.busy)return;
@@ -185,7 +193,7 @@ function render(v,p,H){
   el(status,'small','cm-muted',batch.name+` · 已确认 ${count.confirmed} · 已排除 ${count.excluded+count.skipped}`+(undone?' · 本批次已撤销':''));
   const files=el(status,'details');el(files,'summary','','已识别文件与提示');for(const f of batch.files)el(files,'p','cm-muted',f.name+' · '+(f.source==='alipay'?'支付宝':f.source==='wechat'?'微信':'Excel')+' · '+f.count+' 笔');for(const f of batch.skipped)el(files,'p','cm-muted','未选用 '+f.name+'：'+f.reason);
   if(undone)el(section,'p','cm-muted','这批入账已移入回收站；如需继续处理剩余记录，请重新选择原账单。');
-  const metrics=el(status,'div','cm-import-metrics');for(const [key,label]of [['ready','可直接确认'],['review','待核实'],['unknown','无法识别'],['excluded','已排除']]){const m=el(metrics,'div');el(m,'strong','',String(count[key]));el(m,'span','',label);}
+  const pendingCount=count.ready+count.review+count.unknown;if(pendingCount){const metrics=el(status,'div','cm-import-metrics');for(const [key,label]of [['ready','可直接确认'],['review','待核实'],['unknown','无法识别'],['excluded','已排除']]){const m=el(metrics,'div');el(m,'strong','',String(count[key]));el(m,'span','',label);}}else{const done=el(status,'div','cm-import-done');el(done,'strong','',undone?'本批次已撤销入账':`本批次已处理完：入账 ${count.confirmed} 笔，排除 ${count.excluded+count.skipped} 笔`);const acts=el(done,'div','cm-actions');if(history?.ids?.length&&!undone)btn(acts,'查看已入账账目',()=>{v.reportBack={tab:'ai',month:v.month,book:v.book};v.drillLabel=batch.name+' · 本批次入账';v.month='';v.tab='entries';v.filters={ids:[...history.ids]};v.page=0;v.selected.clear();v.render();},'cm-primary');btn(acts,'导入下一批',()=>choose(v),'cm-ghost');}
   if(batch.rows.some(r=>r.autoExclusion))el(status,'small','cm-muted','交易关闭及唯一匹配的全额退款两侧已默认排除，可在下方查看依据并恢复。部分退款、未匹配或有歧义的记录仍待核实。');
   Issues.render(v,section,state,H,{refund:()=>RefundUI.check(v),refundCount:Refunds.eligible(batch).length,category:()=>enhance(v,{scope:'all',repeat:true,keys:batch.rows.filter(r=>Issues.matches(r,'category')).map(r=>r.key)}),categoryCount:enhanceCandidates(state,{scope:'all'}).filter(r=>Issues.matches(r,'category')).length,confirm:keys=>confirm(v,state,keys,H)});
   Review.refunds(v,section,state,{...H,edit:row=>edit(v,state,row,H)});
@@ -232,18 +240,19 @@ function render(v,p,H){
   // 选择控件：本页 / 本组全部（跨分页）。两者都是开关，已全选时再点一次即取消。
   const selectable=all,pageSelectable=rows;
   const picks=el(list,'div','cm-ai-picks');
-  const picker=(keys,label,labelDone,title)=>{const every=keys.length>0&&keys.every(key=>state.selected.has(key));
-   const control=btn(picks,every?labelDone:label,()=>{for(const key of keys){if(every)state.selected.delete(key);else state.selected.add(key);}v.render();},every?'cm-link active':'cm-link');
-   control.disabled=state.busy||!!undone||!keys.length;control.title=title;control.setAttribute('aria-pressed',String(every));return control;};
+  const pickUpdates=[];
+  const picker=(keys,label,labelDone,title)=>{
+   const control=btn(picks,label,()=>{const every=keys.length>0&&keys.every(key=>state.selected.has(key));for(const key of keys){if(every)state.selected.delete(key);else state.selected.add(key);}v.render();},'cm-link');
+   const sync=()=>{const every=keys.length>0&&keys.every(key=>state.selected.has(key));control.textContent=every?labelDone:label;control.classList.toggle('active',every);control.setAttribute('aria-pressed',String(every));};pickUpdates.push(sync);sync();control.disabled=state.busy||!!undone||!keys.length;control.title=title;return control;};
   picker(pageSelectable.map(r=>r.key),'选择本页（'+pageSelectable.length+'）','取消本页选择（'+pageSelectable.length+'）','选择或取消当前这一页的记录');
   picker(selectable.map(r=>r.key),'全选本组（'+selectable.length+'）','取消全组选择（'+selectable.length+'）','选择当前筛选结果中的全部记录，含未显示的分页');
   const selectNote=el(picks,'small','cm-muted','已选 '+state.selected.size+' 笔，跨分组保留');
   if(!rows.length)el(list,'p','cm-muted',state.flagOnly?'当前分组没有 AI 疑点，可关掉筛选继续处理。':'这个分组已处理完，可以切换其他分组。');
   for(const row of rows){const t=row.entry,line=el(list,'article','cm-ai-row');line.dataset.key=row.key;
    const checkbox=el(line,'input');checkbox.type='checkbox';checkbox.checked=state.selected.has(row.key);checkbox.disabled=state.busy||!!undone;checkbox.setAttribute('aria-label','选择 '+t.title+' '+row.record.line);
-   checkbox.addEventListener('change',()=>{checkbox.checked?state.selected.add(row.key):state.selected.delete(row.key);bulk.textContent='确认所选（'+state.selected.size+'）';bulk.disabled=!state.selected.size;exclude.textContent='排除所选（'+state.selected.size+'）';exclude.disabled=!state.selected.size;bulkSelect.disabled=!state.selected.size;accountFill.disabled=!state.selected.size;selectedAI.textContent='识别所选（'+enhanceCandidates(state,{scope:'selected'}).length+'）';selectedAI.disabled=!enhanceCandidates(state,{scope:'selected'}).length;if(state.enhanceScope==='selected'){const n=enhanceCandidates(state,{scope:'selected'}).length;enhanceBtn.disabled=!n;enhanceBtn.title=n?'分析所选 '+n+' 笔未处理条目':'请先勾选未手改、未处理的记录';actions.querySelector('.cm-ai-enhance-hint').textContent=n?'将分析所选 '+n+' 笔未处理条目':'请先勾选未手改、未处理的记录';}const pair=section.querySelector('.cm-refund-pair-selected');if(pair)pair.disabled=batch.rows.filter(r=>r.state==='pending'&&!r.entry.related&&require('./ai-exclusions').refund(r.record)&&state.selected.has(r.key)).length<2;for(const b of extraBulk)b.disabled=!state.selected.size;selectNote.textContent='已选 '+state.selected.size+' 笔，跨分组保留';overview.textContent=`共 ${count.total} 笔 · 当前筛选 ${all.length} 笔 · 已选 ${state.selected.size} 笔`;});
+   checkbox.addEventListener('change',()=>{checkbox.checked?state.selected.add(row.key):state.selected.delete(row.key);for(const sync of pickUpdates)sync();bulk.textContent='确认所选（'+state.selected.size+'）';bulk.disabled=!state.selected.size;exclude.textContent='排除所选（'+state.selected.size+'）';exclude.disabled=!state.selected.size;bulkSelect.disabled=!state.selected.size;accountFill.disabled=!state.selected.size;selectedAI.textContent='识别所选（'+enhanceCandidates(state,{scope:'selected'}).length+'）';selectedAI.disabled=!enhanceCandidates(state,{scope:'selected'}).length;if(state.enhanceScope==='selected'){const n=enhanceCandidates(state,{scope:'selected'}).length;enhanceBtn.disabled=!n;enhanceBtn.title=n?'分析所选 '+n+' 笔未处理条目':'请先勾选未手改、未处理的记录';actions.querySelector('.cm-ai-enhance-hint').textContent=n?'将分析所选 '+n+' 笔未处理条目':'请先勾选未手改、未处理的记录';}const pair=section.querySelector('.cm-refund-pair-selected');if(pair)pair.disabled=batch.rows.filter(r=>r.state==='pending'&&!r.entry.related&&require('./ai-exclusions').refund(r.record)&&state.selected.has(r.key)).length<2;for(const b of extraBulk)b.disabled=!state.selected.size;selectNote.textContent='已选 '+state.selected.size+' 笔，跨分组保留';overview.textContent=`共 ${count.total} 笔 · 当前筛选 ${all.length} 笔 · 已选 ${state.selected.size} 笔`;});
    const words=el(line,'div','cm-ai-words'),heading=el(words,'div','cm-ai-row-heading'),cat=v.d.categories.find(c=>c.id===t.category);
-   el(heading,'span','cm-category-icon',CategoryIcons.display(cat));el(heading,'strong','',t.title);el(heading,'strong','cm-ai-amount',t.amount==null?'金额待补充':'¥ '+C.money(t.amount));
+   el(heading,'span','cm-category-icon',CategoryIcons.display(cat));el(heading,'strong','',t.title);el(heading,'strong','cm-ai-amount',t.amount==null?'金额待补充':(t.currency==='CNY'?'¥':t.currency||'币种待核实')+' '+C.money(t.amount));
    el(words,'p','cm-muted',`${t.date||'日期待补充'} · ${AI.natureNames[row.nature]} · ${CategoryIcons.label(v.d,t.category)} · ${v.d.accounts.find(a=>a.id===t.account)?.name||'账户待选择'}`);
    if(row.origin==='ai')el(words,'span','cm-badge cm-ai-origin','AI 建议');
    if(row.flags?.length)el(words,'span','cm-badge cm-ai-flag','AI 疑点 '+row.flags.length);

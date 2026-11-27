@@ -22,7 +22,7 @@ function preview(d,book,name,args){
   return {ok:true,intent:'agent_write',name,book,item,actionName:'新建'+label,count:1,amount:0,rows:[{oldStr:'无',newStr:`${value} · ${name==='create_category'?(args.type==='income'?'收入':'支出')+(parent?' · '+C.categoryName(d,parent):''):'人民币 · '+args.type}`}],message:'这是预览，尚未新建。',facts:[]};
  }
  if(!Array.isArray(args.ids)||!args.ids.length||args.ids.length>500||args.ids.some(id=>typeof id!=='string'||!id)||new Set(args.ids).size!==args.ids.length)throw Error('删除须提供 1 至 500 个不重复的账目 ID');
- const rows=args.ids.map(id=>d.entries.find(t=>t.id===id&&t.book===book));if(rows.some(x=>!x))throw Error('部分记录不存在于当前账本');
+ const entries=new Map(d.entries.filter(t=>t.book===book).map(t=>[t.id,t])),rows=args.ids.map(id=>entries.get(id));if(rows.some(x=>!x))throw Error('部分记录不存在于当前账本');
  const ids=new Set(args.ids);if(d.entries.some(t=>t.book===book&&t.related&&ids.has(t.related)&&!ids.has(t.id)))throw Error('关联退款或报销须与原账目一起删除');
  const amount=rows.reduce((n,t)=>n+C.base(t),0);if(!Number.isSafeInteger(amount))throw Error('删除合计超出安全范围');
  return {ok:true,intent:'agent_write',name,book,ids:[...args.ids],signatures:rows.map(t=>JSON.stringify(t)),count:rows.length,amount,rows:rows.map(t=>({id:t.id,date:t.date,title:t.payee||t.title,amount:t.amount,currency:t.currency,oldStr:'账本',newStr:'回收站'})),actionName:'移入回收站',message:'这是预览，尚未删除。',facts:[]};
@@ -44,7 +44,7 @@ function apply(d,plan){
  if(plan.name==='delete_entries'){
   if(JSON.stringify(fresh.signatures)!==JSON.stringify(plan.signatures))throw Error('记录已变化，请重新预览');
   const ids=plan.selectionIds?withSelection(d,plan,plan.selectionIds).selectionIds:plan.ids;
-  const order=d.entries.map(t=>t.id);   // 删除前的完整顺序，撤销时按它还原位置
+  const order=d.entries.filter(t=>t.book===plan.book).map(t=>t.id);
   const draft=C.clone(d);C.removeEntries(draft,ids);C.validate(draft);d.entries=draft.entries;d.trash=draft.trash;return {name:plan.name,book:plan.book,ids:[...ids],order,count:ids.length};
  }
  if(JSON.stringify(fresh.item)!==JSON.stringify(plan.item))throw Error('预览已变化，请重新预览');
@@ -57,19 +57,37 @@ function undo(d,receipt){
  if(Budgets.names.has(receipt.name))return Budgets.undo(d,receipt);
  if(Subscriptions.names.has(receipt.name))return Subscriptions.undo(d,receipt);
  if(receipt.name==='delete_entries'){
-  const ids=receipt.ids.filter(id=>d.trash.some(t=>t.id===id&&t.book===receipt.book));
+  const trash=new Map(d.trash.filter(t=>t.book===receipt.book).map(t=>[t.id,t]));
+  const active=new Map(d.entries.map(t=>[t.id,t]));
+  const requested=new Set(receipt.ids.filter(id=>trash.has(id)));
+  const returned=new Map();
+  for(const t of d.entries)if(['refund','reimbursement'].includes(t.kind))returned.set(t.related,(returned.get(t.related)||0)+t.amount);
+  const ids=[];
+  for(const id of requested){
+   const t=trash.get(id);
+   if(['refund','reimbursement'].includes(t.kind)){
+    const original=active.get(t.related)||(requested.has(t.related)?trash.get(t.related):null),total=(returned.get(t.related)||0)+t.amount;
+    if(!original||original.kind!=='expense'||original.book!==t.book||original.currency!==t.currency||original.rate!==t.rate||original.category!==t.category||original.date>t.date||t.kind==='reimbursement'&&!original.reimbursable||total>original.amount)continue;
+    returned.set(t.related,total);
+   }
+   ids.push(id);
+  }
   if(!ids.length)return {restored:0,skipped:receipt.ids.length};
   const draft=C.clone(d);C.restoreEntries(draft,ids);
-  // 恢复回原来的位置（而不是一律追加到末尾），这样撤销后数据逐字节还原
+  // Restore the book's relative order while leaving other books in place.
   if(Array.isArray(receipt.order)&&receipt.order.length){
    const idx=new Map(receipt.order.map((id,i)=>[id,i]));
-   draft.entries.sort((a,b)=>{const ia=idx.has(a.id)?idx.get(a.id):null,ib=idx.has(b.id)?idx.get(b.id):null;if(ia===null&&ib===null)return 0;if(ia===null)return 1;if(ib===null)return -1;return ia-ib;});
+   const ordered=draft.entries.filter(t=>t.book===receipt.book).sort((a,b)=>(idx.get(a.id)??Infinity)-(idx.get(b.id)??Infinity));
+   let i=0;
+   draft.entries=draft.entries.map(t=>t.book===receipt.book?ordered[i++]:t);
   }
-  C.validate(draft);d.entries=draft.entries;d.trash=draft.trash;return {restored:ids.length,skipped:receipt.ids.length-ids.length};
+  d.entries=draft.entries;d.trash=draft.trash;return {restored:ids.length,skipped:receipt.ids.length-ids.length};
  }
  const table=receipt.name==='create_category'?'categories':'accounts',current=d[table].find(x=>x.id===receipt.id);
  if(!current||JSON.stringify(current)!==JSON.stringify(receipt.item))return {restored:0,skipped:1};
- const used=receipt.name==='create_category'?[...d.entries,...d.trash,...d.categories,...d.budgets,...d.templates,...d.rules].some(x=>x!==current&&JSON.stringify(x).includes(receipt.id)):[...d.entries,...d.trash,...d.templates,...d.rules].some(x=>JSON.stringify(x).includes(receipt.id));
+ const field=receipt.name==='create_category'?'category':'account',Refs=require('./category-tools');
+ const related=[d.entries,d.trash,d.templates,d.rules,d.budgets,d.goals,d.settings.lastEntry,d.settings.savedReports,d.settings.savedEntryFilters,d.settings.chartDefaults];
+ const used=(field==='category'&&d.categories.some(c=>c.parent===receipt.id))||Refs.hasReference(related,receipt.id,field);
  if(used)return {restored:0,skipped:1};
  const draft=C.clone(d);draft[table]=draft[table].filter(x=>x.id!==receipt.id);C.validate(draft);d[table]=draft[table];return {restored:1,skipped:0};
 }

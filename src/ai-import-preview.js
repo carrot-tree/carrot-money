@@ -16,12 +16,12 @@ function open(v,state,keys,H,save,{highOnly=false}={}){
   el(navigation,'span','cm-muted cm-import-preview-range');const range=navigation.lastElementChild;
   if(pages>1){const pager=el(navigation,'div','cm-import-preview-pager');let label;const prev=btn(pager,'上一页',()=>{page=Math.max(0,page-1);update();});label=el(pager,'span');label.setAttribute('aria-live','polite');const next=btn(pager,'下一页',()=>{page=Math.min(pages-1,page+1);update();});const update=()=>{draw();label.textContent=(page+1)+' / '+pages;range.textContent='正在核对 '+(page*20+1)+'–'+Math.min((page+1)*20,check.rows.length)+' / '+check.rows.length+' 笔';prev.disabled=page===0;next.disabled=page===pages-1;list.scrollTop=0;};update();}
   else range.textContent='共 '+check.rows.length+' 笔记录';
-  const allowed=check.rows.filter(r=>!blocked.has(r.key)).map(r=>r.key),partial=!!check.blocked.length&&!check.error&&allowed.length>0;
+  const allowed=check.allowed,partial=!!check.blocked.length&&!check.error&&allowed.length>0;
   const bottom=el(footer,'div','cm-import-preview-bottom'),note=el(bottom,'div','cm-import-preview-note');
   el(note,'strong','',check.error?'请返回处理后重新核对':check.blocked.length?allowed.length+' 笔可入账 · '+check.blocked.length+' 笔需处理':selected.length+' 笔已就绪');
   el(note,'small','cm-muted',partial?'仅确认可入账项，其余保留在复核队列。':check.ok?'确认后写入账本，可在导入批次中撤销。':'所选记录尚不能入账，请返回补全或修正。');
   const actions=el(bottom,'div','cm-import-preview-actions'),back=btn(actions,'返回复核',()=>modal.close());let confirm;
-  const run=async runKeys=>{confirm.disabled=true;back.disabled=true;error.textContent='正在保存…';try{if(state.batch!==batch||v.book!==batch.book||v.p.store.raw!==raw||JSON.stringify(batch)!==signature)throw Error('预览后账本或复核队列已变化，请返回重新核对');const n=await save(v,state,runKeys,highOnly);if(!n)throw Error('本次没有入账，请重新核对');modal.close();}catch(e){error.textContent=e.message;error.scrollIntoView?.({block:'nearest'});}finally{confirm.disabled=!(check.ok||partial);back.disabled=false;}};
+  const run=async runKeys=>{confirm.disabled=true;back.disabled=true;error.textContent='正在保存…';try{if(state.batch!==batch||v.book!==batch.book||v.p.store.raw!==raw||JSON.stringify(batch)!==signature)throw Error('预览后账本或复核队列已变化，请返回重新核对');const latest=AI.preflight(v.d,batch,runKeys,{highOnly});if(!latest.ok)throw Error(latest.error||'确认范围已变化，请返回重新核对');const n=await save(v,state,runKeys,highOnly);if(!n)throw Error('本次没有入账，请重新核对');modal.close();}catch(e){error.textContent=e.message;error.scrollIntoView?.({block:'nearest'});}finally{confirm.disabled=!(check.ok||partial);back.disabled=false;}};
   confirm=btn(actions,partial?'仅确认可入账 '+allowed.length+' 笔':check.ok?'确认入账（'+selected.length+' 笔）':'请先处理待核实项',()=>run(partial?allowed:selected),'mod-cta');confirm.disabled=!(check.ok||partial);
 
  };

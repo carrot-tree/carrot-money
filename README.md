@@ -1,4 +1,4 @@
-# 🥕 Carrot 记账
+# 🥕 Carrot 记账 v0.54.6
 
 把日子，记成喜欢的样子。一个在 Obsidian 中使用的本地记账桌面，包含账单、账户、预算、消费分析、周期计划，以及可选的 AI 管账。
 
@@ -64,7 +64,9 @@
 
 ## 编辑与恢复
 
-已有账目的编辑页和详情页均可删除。确认时列出需一同移入回收站的关联退款／报销，整组记录可以恢复。
+已有账目的编辑页和详情页均可删除。确认时列出需一同移入回收站的关联退款／报销，整组记录可以恢复。回收站支持彻底删除单笔或清空，彻底删除支出时一并清理回收站中的关联退款或报销。
+
+自动保留最近 30 天每日快照和最近 20 份手动快照。外观、会话、偏好及手动草稿出现同步冲突后，可通过「重新读取本地设置」恢复。
 
 ![编辑已有账目，顶部提供删除入口](https://raw.githubusercontent.com/carrot-tree/carrot-money/v0.51.0/docs/images/edit-delete.png)
 
@@ -74,7 +76,7 @@
 
 ## 安装与更新
 
-1. 从 [Releases](https://github.com/carrot-tree/carrot-money/releases/latest) 下载 `Carrot-Money-0.54.1.zip`。
+1. 从 [Releases](https://github.com/carrot-tree/carrot-money/releases/latest) 下载 `Carrot-Money-0.54.6.zip`。
 2. 将压缩包中的 `carrot-money` 文件夹放入库的 `.obsidian/plugins/`。
 3. 在 Obsidian「设置 → 第三方插件」启用「Carrot 记账」。更新已安装版本后，重新加载该插件。
 
@@ -95,10 +97,10 @@ npm test
 npm run build
 ```
 
-源码位于 `src/`，构建入口为 `build.js`，发布运行文件为 `main.js`。当前包含80个源码模块、19个测试文件、363项自动回归。
+源码位于 `src/`，构建入口为 `build.js`，发布运行文件为 `main.js`。当前包含 83 个源码模块、30 个测试文件、454 项自动测试。客户端版本由 `manifest.json` 提供，构建时校验与 `package.json` 一致。
 
 0.54.1 的发布候选通过363项自动回归。真实 OpenCode Go（DeepSeek V4.1 Flash）用虚构账本验证了两笔预览、确认、撤销、Mac mini 单笔取消，以及保存关闭 AI 服务后的会话同步。
 
-本版外观候选由独立审查员在原生 Obsidian 中检查，页面截图与运行文件哈希有记录；最终业务测试使用实际插件流程和内存账本适配器。最终协调者原生窗口连接超时，新增删除焦点与 Enter 保存未补做完整原生点击验收。真实手机、iPad及完整键盘遍历未验证，不把桌面宽度模拟当作真机验收。
+阶段 2 使用虚构账本、内存 Vault 及注入的 Obsidian 接口执行自动测试，包含万级校验基准、打包加载、文件冲突、AI 预览与撤销、触控与键盘交互。原生 Obsidian、移动端真机和真实 AI 服务需独立验收。
 
-[详细验证范围](https://github.com/carrot-tree/carrot-money/blob/v0.54.1/docs/verification.md)
+[0.54.1 历史验收记录](https://github.com/carrot-tree/carrot-money/blob/v0.54.1/docs/verification.md)

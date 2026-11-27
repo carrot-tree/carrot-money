@@ -16,6 +16,7 @@ function html(value){
 async function copy(value,clipboard){
  const text=String(value||'');if(clipboard)return await clipboard.writeText(text);
  try{if(globalThis.navigator?.clipboard){await globalThis.navigator.clipboard.writeText(text);return;}}catch{}
- const desktop=require('electron').clipboard;if(!desktop?.writeText)throw Error('剪贴板不可用');desktop.writeText(text);
+ try{const desktop=require('electron').clipboard;if(desktop?.writeText){desktop.writeText(text);return;}}catch{}
+ throw Error('当前设备无法直接复制，请选中文字后手动复制。');
 }
 module.exports={html,copy};

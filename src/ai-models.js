@@ -30,21 +30,23 @@ function parseModels(payload){
  if(!ids.length)throw Error('服务返回的模型列表为空');
  return ids.sort((a,b)=>a.localeCompare(b,'en'));
 }
-async function readModels(settings,{requestUrl}={}){
+async function readModels(settings,{requestUrl,userInitiated=false}={}){
  const current=R.config(settings);
  // GET /models does not require a selected model. A provider with no built-in
  // suggestions must be discoverable before its first model can be selected.
  settings={...settings,aiEnhancement:{...current,model:current.model||'model-catalog-read',reasoningEffort:''}};
- const blocked=R.unavailable(settings,true);if(blocked)return {ok:false,models:[],message:blocked};
+ const blocked=R.unavailable(settings,userInitiated);if(blocked)return {ok:false,models:[],message:blocked};
  let c;try{c=R.validateConfig(R.config(settings));}catch(e){return {ok:false,models:[],message:e.message};}
  let url;try{url=modelsEndpoint(c.baseUrl);}catch(e){return {ok:false,models:[],message:e.message};}
  let timer;
  try{
   const timeout=new Promise((_,reject)=>{timer=setTimeout(()=>reject(new R.ProviderError(`读取模型列表超时（${c.timeoutSeconds} 秒）`)),c.timeoutSeconds*1000);});
-  const response=await Promise.race([Promise.resolve().then(()=>{
+  const pending=Promise.resolve().then(()=>{
    const request=requestUrl||require('obsidian').requestUrl;
    return request({url,method:'GET',headers:Presets.headers(c),throw:false});
-  }),timeout]);
+  });
+  pending.catch(()=>{});
+  const response=await Promise.race([pending,timeout]);
   if(!Number.isInteger(response?.status))throw new R.ProviderError('服务未返回有效 HTTP 状态');
   if(response.status<200||response.status>=300)throw R.responseError(response);
   let payload;try{payload=response.json??JSON.parse(response.text);}catch{throw new R.ProviderError('服务返回的响应不是有效 JSON');}

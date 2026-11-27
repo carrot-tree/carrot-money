@@ -14,7 +14,7 @@ function requestedCount(question){
 }
 function argsList(name,args){
  if(!names.has(name)||!object(args))throw Error('新增账目参数无效');
- if(args.replacesTurn!==undefined&&(!Number.isInteger(args.replacesTurn)||args.replacesTurn<1))throw Error('替代预览轮次无效');
+ if(args.replacesTurn!==undefined&&!/^[\w-]{1,128}$/.test(typeof args.replacesTurn==='string'?args.replacesTurn:'')&&!(Number.isInteger(args.replacesTurn)&&args.replacesTurn>0))throw Error('替代预览轮次无效');
  if(name==='create_entry'){const {replacesTurn,...item}=args;return [item];}
  if(Object.keys(args).some(k=>!['entries','replacesTurn'].includes(k))||!Array.isArray(args.entries)||!args.entries.length||args.entries.length>50)throw Error('请提供1至50笔待新增账目');
  return args.entries;
@@ -34,7 +34,7 @@ function normalize(d,book,raw,id){
  const currency=linked?original.currency:raw.currency||'CNY';
  const account=id=>{const a=d.accounts.find(a=>a.id===id&&!a.archived);if(!a)throw Error('请先查询并明确选择可用付款/收款账户，不能猜测账户');return a;};
  if(!raw.splits?.length&&!raw.account)throw Error('还缺付款/收款账户，请先向用户询问');
- if(raw.account&&account(raw.account).currency!==currency)throw Error('币种与付款/收款账户不一致');
+ if(!raw.splits?.length&&raw.account&&account(raw.account).currency!==currency)throw Error('币种与付款/收款账户不一致');
  if(raw.splits!==undefined&&(!Array.isArray(raw.splits)||raw.splits.some(s=>!object(s)||Object.keys(s).some(k=>!['account','amount'].includes(k))||account(s.account).currency!==currency)))throw Error('组合付款账户无效');
  let rate=linked?original.rate:currency==='CNY'?1:raw.rate;
  if(!Number.isFinite(rate)||rate<=0)throw Error('外币账目缺少明确的历史折算人民币汇率，请补充后再预览');
@@ -49,7 +49,7 @@ function normalize(d,book,raw,id){
   if(raw.toAmount!==undefined&&to.currency===currency&&raw.toAmount!==raw.amount)throw Error('同币种转账到账金额应与转出金额一致，手续费另记支出');
   if(!Number.isSafeInteger(toAmount)||toAmount<=0)throw Error('跨币种转账须明确到账原币金额');
  }else if(raw.toAccount||raw.toAmount)throw Error('只有转账可以设置到账账户和金额');
- return C.newEntry(d,{...C.clone(raw),id,book,title:raw.title.trim(),currency,rate,category:category||'',toAmount});
+ return C.newEntry(d,{...C.clone(raw),...(raw.splits?.length?{account:''}:{}),id,book,title:raw.title.trim(),currency,rate,category:category||'',toAmount});
 }
 const duplicateKey=t=>JSON.stringify([t.kind,t.date,t.amount,t.currency,t.account,t.toAccount,t.toAmount,t.related,t.title.trim(),t.payee||'']);
 function detail(d,t){
@@ -88,6 +88,9 @@ function undo(d,receipt){
 function edit(d,plan,id,changes){
  const at=plan.ids.indexOf(id);if(at<0)throw Error('找不到待新增账目');
  const args=C.clone(plan.request),raw=plan.name==='create_entry'?args:args.entries[at];Object.assign(raw,changes);
+ if(changes.amount!==undefined&&raw.splits?.length&&changes.splits===undefined){
+  raw.splits=C.allocateSplits(raw.splits,changes.amount,raw.splits.reduce((sum,part)=>sum+part.amount,0));
+ }
  return preview(d,plan.book,plan.name,args,{ids:plan.ids});
 }
 module.exports={names,requestedCount,preview,withSelection,apply,undo,edit};

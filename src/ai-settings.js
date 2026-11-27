@@ -1,6 +1,6 @@
 'use strict';
 const Remote=require('./ai-provider'),Presets=require('./ai-presets'),Models=require('./ai-models'),Reasoning=require('./ai-reasoning'),Agent=require('./ai-agent'),{Notice}=require('obsidian');
-const numericFields=['batchSize','importConcurrency','timeoutSeconds','askMaxOutputTokens','agentMaxCalls','agentMaxOutputTokens','agentMaxSeconds','agentMaxTokens'];
+const numericFields=['batchSize','importConcurrency','timeoutSeconds','agentMaxCalls','agentMaxOutputTokens','agentMaxSeconds','agentMaxTokens'];
 const stable=value=>Array.isArray(value)?value.map(stable):value&&typeof value==='object'?Object.fromEntries(Object.keys(value).sort().map(key=>[key,stable(value[key])])):value;
 function fingerprint(value){const normalized=JSON.parse(JSON.stringify(value));for(const key of numericFields)if(normalized[key]!==undefined&&String(normalized[key]).trim()!==''&&Number.isFinite(Number(normalized[key])))normalized[key]=Number(normalized[key]);return JSON.stringify(stable(normalized));}
 function render(root,p,{Setting}){
@@ -9,7 +9,7 @@ function render(root,p,{Setting}){
  const checks={};root.classList.add('cm-ai-settings');
  const live=()=>!disposed&&root.isConnected!==false;
  const changed=()=>fingerprint(draft)!==baseline;
- const canRead=()=>Boolean(draft.enabled&&String(draft.baseUrl||'').trim()&&String(draft.apiKey||'').trim());
+ const canRead=()=>Boolean(draft.enabled&&String(draft.baseUrl||'').trim()&&Remote.hasCredentials(draft));
  const snapshot=()=>JSON.parse(JSON.stringify(draft));
  const rememberSaved=()=>{baseline=fingerprint(Remote.config(p.data.settings));};
  const group=(title,description,{collapsed=false}={})=>{const box=root.createEl(collapsed?'details':'section',{cls:'cm-ai-settings-group'});box.createEl(collapsed?'summary':'h4',{text:title});if(description)box.createEl('p',{cls:'cm-ai-settings-help',text:description});return box;};
@@ -36,7 +36,7 @@ function render(root,p,{Setting}){
  const save=async()=>{
   if(busy||!live())return;let next;try{next=validate();assertUnchanged(baseline);}catch(e){say('暂不能保存：'+e.message,true);return;}
   const expected=baseline;setBusy(true);
-  try{await p.change(d=>{assertUnchanged(expected);if(fingerprint(Remote.config(d.settings))!==expected)throw Error('设置已更新');d.settings.aiEnhancement=next;},{check:()=>assertUnchanged(expected)});if(!live())return;Object.assign(draft,next);rememberSaved();for(const key of ['baseUrl','model','apiKey'])fields[key].setValue(draft[key]);hide();fillModels();say('AI 设置已保存，管账将使用这份配置。',true);}
+  try{await p.change(d=>{assertUnchanged(expected);if(fingerprint(Remote.config(d.settings))!==expected)throw Error('设置已更新');d.settings.aiEnhancement=next;},{check:()=>assertUnchanged(expected),saveAIKeys:true});if(!live())return;Object.assign(draft,next);rememberSaved();for(const key of ['baseUrl','model','apiKey'])fields[key].setValue(draft[key]);hide();fillModels();say('AI 设置已保存，管账将使用这份配置。',true);}
   catch{say('保存失败，输入已保留。请检查写入权限；若设置已在其他位置更新，请重新打开设置后核对。',true);}
   finally{setBusy(false);}
  };
@@ -47,7 +47,7 @@ function render(root,p,{Setting}){
  const text=(parent,key,name,description,{password=false,max}={})=>new Setting(parent).setName(name).setDesc(description).addText(input=>{fields[key]=input;inputs.push(input);input.inputEl.type=password?'password':max?'number':'text';input.inputEl.setAttribute('aria-label',name);if(password){input.inputEl.autocomplete='off';input.inputEl.spellcheck=false;}if(max){input.inputEl.min='1';input.inputEl.max=String(max);input.inputEl.step='1';}input.setValue(String(draft[key]??''));input.onChange(value=>{if(busy)return;if(['apiKey','baseUrl'].includes(key)&&value!==draft[key])delete draft.modelCatalog[draft.presetId];draft[key]=value;dirty();});});
  text(connection,'baseUrl','服务地址','填写服务商提供的兼容接口地址。公网须为 HTTPS，本机和私网可用 HTTP。');
  const destination=connection.createEl('p',{cls:'cm-ai-destination'});destination.setAttribute('aria-live','polite');destination.textContent=Presets.target(draft.baseUrl).text;
- text(connection,'apiKey','API Key','按服务商分别记住。保存后以明文保存在本机 Carrot记账/data.json；完整导出、快照和库同步可能包含 Key。',{password:true});
+ text(connection,'apiKey','API Key','按服务商记在 Obsidian 插件私有数据中。账本文件、快照与完整 JSON 导出均不包含 Key。本机 loopback 服务可留空。',{password:true});
  new Setting(connection).setName('显示 API Key').setDesc('默认隐藏；切换服务商或重新打开设置会隐藏。').addToggle(toggle=>{showKey=toggle;inputs.push(toggle);toggle.setValue(false).onChange(value=>{if(!busy)fields.apiKey.inputEl.type=value?'text':'password';});});
  const candidate=new Setting(connection).setName('候选模型').setDesc('候选列表方便选择；也可直接填写服务商提供的模型名。');
  candidate.addDropdown(drop=>{modelChoice=drop;inputs.push(drop);drop.selectEl.setAttribute('aria-label','候选模型');drop.onChange(value=>{if(!busy&&value){draft.model=value;fields.model.setValue(value);dirty();}});});
@@ -71,7 +71,7 @@ function render(root,p,{Setting}){
  text(connection,'model','模型名','以服务商提供的模型 ID 为准。切换模型后建议重新检测。');
  const diagnostics=group('2 · 检查与检测','本地检查不联网。连接检测发送固定问候；Agent 检测使用虚构工具数据。两项网络检测均不发送账单，也不修改账本。');
  checks.local=new Setting(diagnostics).setName('本地配置检查').setDesc('尚未检查；检查地址、必填项和参数范围。');
- checks.local.addButton(button=>{inputs.push(button);button.setButtonText('检查配置（不联网）').onClick(()=>{if(busy)return;try{validate();const missing=[];if(!draft.enabled)missing.push('AI 服务尚未启用');if(!String(draft.apiKey||'').trim())missing.push('尚未填写 API Key');const message=missing.length?'参数格式通过；'+missing.join('；')+'。':'本地配置检查通过；地址、Key 与模型的实际可用性还需联网检测。';checks.local.setDesc(message);say(message,true);}catch(e){const message='本地配置检查未通过：'+e.message;checks.local.setDesc(message);say(message,true);}});});
+ checks.local.addButton(button=>{inputs.push(button);button.setButtonText('检查配置（不联网）').onClick(()=>{if(busy)return;try{validate();const missing=[];if(!draft.enabled)missing.push('AI 服务尚未启用');if(!Remote.hasCredentials(draft))missing.push('尚未填写 API Key');const message=missing.length?'参数格式通过；'+missing.join('；')+'。':'本地配置检查通过；地址、Key 与模型的实际可用性还需联网检测。';checks.local.setDesc(message);say(message,true);}catch(e){const message='本地配置检查未通过：'+e.message;checks.local.setDesc(message);say(message,true);}});});
  const runCheck=async kind=>{
   if(busy||!live()||!canRead()||kind==='agent'&&!draft.agentEnabled)return;const fn=kind==='agent'?Remote.testAgent:Remote.testConnection;if(typeof fn!=='function')return;
   const label=kind==='agent'?'Agent 检测':'连接检测';setBusy(true);checks[kind].setDesc('正在检测…');say('正在进行'+label+'…');
@@ -91,23 +91,27 @@ function render(root,p,{Setting}){
  effortNote=new Setting(usage).setName('思考选项来源');
  new Setting(usage).setName('账单识别模式').setDesc('快速识别精简输出并在支持时降低思考；疑难账单可选择按模型设置。只影响导入识别。').addDropdown(drop=>{inputs.push(drop);drop.addOption('fast','快速识别').addOption('model','按模型设置').setValue(draft.importSpeed).onChange(value=>{if(busy)return;draft.importSpeed=value;dirty();});});
  new Setting(usage).setName('显示发送字段记录').setDesc('每轮 Agent 完成后显示本次发送给模型的字段类别。').addToggle(toggle=>{inputs.push(toggle);toggle.setValue(draft.agentShowSentFields).onChange(value=>{if(busy)return;draft.agentShowSentFields=value;dirty();});});
- const privacy=usage.createEl('details',{cls:'cm-ai-settings-privacy'});privacy.createEl('summary',{text:'查看发送范围与本地保存说明'});privacy.createEl('p',{text:'AI 识别会发送所选账单的识别字段；Agent 按问题查询账本并发送必要的汇总和逐笔展示字段。按期间归类可能发送整个期间账单的日期、商户、标题、备注、现有分类和金额。Key 明文位于本机 data.json 的 settings.aiEnhancement.profiles，当前 Key 同时保留在 apiKey；完整导出、快照和同步可能包含所有 Key。'});
+ const privacy=usage.createEl('details',{cls:'cm-ai-settings-privacy'});privacy.createEl('summary',{text:'查看发送范围与本地保存说明'});privacy.createEl('p',{text:'AI 识别会发送所选账单的识别字段；Agent 按问题查询账本并发送必要的汇总和逐笔展示字段。按期间归类可能发送整个期间账单的日期、商户、标题、备注、现有分类和金额。Key 保存在 Obsidian 插件私有数据中。搬迁账本后可按服务商重新填写 Key。'});
  const advanced=group('高级参数与 Key 管理','通常保留默认即可。服务限流时可减少识别并发；慢模型可适当增加超时和输出上限。',{collapsed:true});
  text(advanced,'batchSize','每批账单条数','默认 20，范围 1–100。',{max:100});
  text(advanced,'importConcurrency','识别并发批数','默认 2，范围 1–3；限流时建议设为 1。',{max:3});
  text(advanced,'timeoutSeconds','单次请求超时（秒）','默认 60，范围 1–120；慢服务商可设为 90–120。超时后迟到结果不会采用。',{max:120});
- text(advanced,'askMaxOutputTokens','AI 提问最大输出 token','默认 4096，范围 1–32768；带推理的模型需要更大预算。',{max:32768});
  text(advanced,'agentMaxCalls','Agent 最多工具调用次数','默认 24，范围 1–40。',{max:40});
  text(advanced,'agentMaxOutputTokens','Agent 单次输出上限','默认 16384，范围 1–32768。',{max:32768});
  text(advanced,'agentMaxTokens','Agent 每轮累计 token 上限','默认 200000，范围 10000–1000000。包括本轮各次请求的输入和输出。',{max:1000000});fields.agentMaxTokens.inputEl.min='10000';
  text(advanced,'agentMaxSeconds','Agent 总时长上限（秒）','默认 300，范围 1–3600。',{max:3600});
  const clear=async all=>{
   if(busy||!live())return;const expected=baseline,id=all?undefined:draft.presetId;setBusy(true);
-  try{await p.change(d=>{assertUnchanged(expected);const saved=Remote.config(d.settings);if(fingerprint(saved)!==expected)throw Error('配置已变化');if(id&&!saved.profiles[id])saved.profiles[id]={apiKey:''};Presets.clearKeys(saved,id);d.settings.aiEnhancement=saved;},{check:()=>assertUnchanged(expected)});if(!live())return;Presets.clearKeys(draft,id);rememberSaved();fields.apiKey.setValue(draft.apiKey);hide();resetChecks();fillModels();say((all?'全部服务商 Key':'当前服务商 Key')+'已从当前设置清除。其他输入仍按顶部保存状态处理；历史快照和导出副本不受影响。',true);}
+  try{
+   await p.clearAIKeys(id,{check:()=>assertUnchanged(expected)});
+   if(!live())return;
+   Presets.clearKeys(draft,id);rememberSaved();fields.apiKey.setValue(draft.apiKey);hide();resetChecks();fillModels();
+   say((all?'全部服务商 Key':'当前服务商 Key')+'已从插件私有数据清除。其他输入仍按顶部保存状态处理；已导出到别处的旧副本需单独处理。',true);
+  }
   catch{say('清除失败，当前输入已保留。设置可能有外部更新或写入失败，请重新核对。',true);}
   finally{setBusy(false);}
  };
- const removal=new Setting(advanced).setName('清除已保存 Key').setDesc('立即保存清除结果，不删除账目；旧备份、导出和同步历史需自行处理。');
+ const removal=new Setting(advanced).setName('清除已保存 Key').setDesc('立即从插件私有数据清除 Key。已导出到别处的旧副本和同步历史需单独处理。');
  for(const [label,all]of [['清除当前 Key',false],['清除全部 Key',true]])removal.addButton(button=>{inputs.push(button);button.setButtonText(label).onClick(()=>clear(all));});
  fillModels();refreshState();
  return {dispose(){disposed=true;hide();}};

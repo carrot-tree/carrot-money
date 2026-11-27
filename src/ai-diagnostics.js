@@ -34,7 +34,7 @@ async function testAgent(settings,{requestUrl,userInitiated=false}={}){
  try{
   const c=Remote.config(settings);
   if(!c.enabled)return result(false,'AI 服务未开启，请先开启后测试。');
-  if(!String(c.apiKey||'').trim())return result(false,'未配置 API Key，请先填写后测试。');
+  if(!Remote.hasCredentials(c))return result(false,'未配置 API Key，请先填写后测试。');
   if(!c.agentEnabled)return result(false,'Agent 未开启，请先开启后测试。');
   let validated;try{validated=Remote.validateConfig(c);}catch{return result(false,'AI 服务配置无效，请检查地址、模型、超时和思考选项。');}
   const testSettings={aiEnhancement:{...validated,agentConfigVersion:3,timeoutSeconds:Math.min(validated.timeoutSeconds,45),agentMaxSeconds:Math.min(validated.agentMaxSeconds,90),agentMaxCalls:4,agentMaxOutputTokens:OUTPUT_LIMIT}};

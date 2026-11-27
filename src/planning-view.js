@@ -18,7 +18,7 @@ function render(v,p,H){
  if(due.length>10)v.pager(banner,state.duePage,count,n=>{state.duePage=n;v.render();});
  if(due.length)btn(banner,'确认全部到期账单入账',()=>new Confirm(v.p,'确认周期入账',`将新增 ${due.length} 笔，请先核对金额、账户与日期。`,()=>v.p.change(d=>{C.postDue(d,C.today(),v.book);})).open(),'cm-link');
  const forecast=panel(p,'未来账单','只计算启用的周期计划，不代表全部未来消费');
- const controls=el(forecast,'div','cm-actions'),horizon=field(controls,'预测范围','select',state.horizon,[[30,'未来 30 天'],[90,'未来 90 天'],[365,'未来 365 天']]);horizon.addEventListener('change',()=>{state.horizon=Number(horizon.value);state.page=0;v.render();});
+ const controls=el(forecast,'div','cm-actions cm-plan-controls'),horizon=field(controls,'预测范围','select',state.horizon,[[30,'未来 30 天'],[90,'未来 90 天'],[365,'未来 365 天']]);horizon.addEventListener('change',()=>{state.horizon=Number(horizon.value);state.page=0;v.render();});
  const filter=btn(controls,state.subscriptions?'仅看订阅 ✓':'仅看订阅',()=>{state.subscriptions=!state.subscriptions;state.page=0;v.render();},state.subscriptions?'active':'');filter.setAttribute('aria-pressed',String(state.subscriptions));
  let projection;try{projection=P.forecast(v.d,v.book,C.today(),state.horizon,state.subscriptions);}catch(e){el(forecast,'p','cm-error',e.message);return;}
  const metrics=el(forecast,'div','cm-plan-metrics');for(const [label,value]of [['预计支出',projection.expense],['预计收入',projection.income],['预计结余',projection.income-projection.expense]]){const item=el(metrics,'div');el(item,'small','cm-muted',label);el(item,'strong','','¥ '+C.money(value));}

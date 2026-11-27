@@ -42,11 +42,11 @@ function facts(d,book,month,title){
 }
 // Keep accounting facts in integer minor units; only the model-facing copy uses display amounts.
 // Exact keys avoid accidentally converting incomeShare, overrunPercent, counts or exchange rates.
-const moneyFields=new Set(['amount','finalAmount','baseAmount','income','expense','grossExpense','netExpense','netIncome','balance','budget','actual','difference','overrun','spent','left','previousExpense','delta','monthlyAverage','meanExpense']);
+const moneyFields=new Set([...Tools.originalMoneyFields,'baseAmount','income','expense','grossExpense','netExpense','netIncome','balance','budget','actual','difference','overrun','spent','left','previousExpense','delta','monthlyAverage','meanExpense']);
 function modelFacts(value){
  if(Array.isArray(value))return value.map(modelFacts);
  if(value&&typeof value==='object')return Object.fromEntries(Object.entries(value).map(([key,item])=>{
-  if(typeof item==='number'&&Number.isFinite(item)&&moneyFields.has(key)){const currency=['amount','finalAmount'].includes(key)?value.currency||'CNY':'CNY';return [key,(currency==='CNY'?'¥':currency+' ')+(item/100).toFixed(2)];}
+  if(typeof item==='number'&&Number.isFinite(item)&&moneyFields.has(key)){const currency=Tools.originalMoneyFields.has(key)?value.currency||'CNY':'CNY';return [key,(currency==='CNY'?'¥':currency+' ')+(item/100).toFixed(2)];}
   return [key,modelFacts(item)];
  }));
  return value;
@@ -123,10 +123,10 @@ async function run(question,{job,d,book,vault,settings,cfg,requestUrl,signal,sho
     if(cfg.agentShowSentFields)state.sentFields.push({fields:['当前报告问题','月份与板块规格','本地收支及相关汇总','最多12项相关记录，排除备注、人物、标签、账户和余额',...(data.subscriptions?['当前订阅名称、每期金额、币种、分类、周期、下次日期、启停状态及读取日期']:[])],section,attempt:attempt+1});emit();
     const controller=new AbortController(),abort=()=>controller.abort();signal?.addEventListener('abort',abort,{once:true});const timer=setTimeout(abort,Math.max(1,deadline-clock()));let localSave=false;
     try{
-     const response=await Remote.completion({...remote,timeoutSeconds:Math.min(remote.timeoutSeconds,Math.max(1,Math.ceil((deadline-clock())/1000)))},body,requestUrl,{signal:controller.signal});check();
-     for(const [k,wire]of [['promptTokens','prompt_tokens'],['completionTokens','completion_tokens'],['totalTokens','total_tokens']])state.usage[k]+=Number(response.usage?.[wire]||0);if(Object.keys(response.usage||{}).length)state.usage.reported=true;
+     const response=await Remote.completion({...remote,timeoutSeconds:Math.min(remote.timeoutSeconds,Math.max(1,Math.ceil((deadline-clock())/1000)))},body,requestUrl,{signal:controller.signal,shouldContinue:()=>shouldContinue()&&clock()<deadline});check();
+     Remote.trackUsage(state.usage,response);
      if(response.finishReason==='length')throw Error('单节输出被截断');
-     const value=JSON.parse(response.content);if(!value||typeof value.markdown!=='string'||Object.keys(value).some(k=>k!=='markdown'))throw Error('只接受 markdown 字段');
+     const value=require('./ai-review-job').parseJSON(response.content);if(!value||typeof value.markdown!=='string'||Object.keys(value).some(k=>k!=='markdown'))throw Error('只接受 markdown 字段');
      const doc=MD.parse(value.markdown,{maxSections:1});if(doc.title||doc.sections[0].title!==section||!doc.sections[0].body)throw Error('须完整写入指定的一个板块：'+section);
      Tools.validateClaims(value.markdown,evidence);check();
      const existing=present.size>0;

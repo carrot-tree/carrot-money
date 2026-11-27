@@ -1,6 +1,6 @@
 'use strict';
 const C=require('./core'),AI=require('./ai-import'),Presets=require('./ai-presets'),Reasoning=require('./ai-reasoning'),Exclusions=require('./ai-exclusions');
-const defaults=Object.freeze({enabled:false,...Presets.restore(),mode:'chat_completions',batchSize:20,importConcurrency:2,importSpeed:'fast',timeoutSeconds:60,askMaxOutputTokens:4096,agentEnabled:true,agentMaxCalls:24,agentMaxTokens:200000,agentMaxOutputTokens:16384,agentConfigVersion:3,agentMaxSeconds:300,agentShowSentFields:true});
+const defaults=Object.freeze({enabled:false,...Presets.restore(),mode:'chat_completions',batchSize:20,importConcurrency:2,importSpeed:'fast',timeoutSeconds:60,agentEnabled:true,agentMaxCalls:24,agentMaxTokens:200000,agentMaxOutputTokens:16384,agentConfigVersion:3,agentMaxSeconds:300,agentShowSentFields:true});
 const config=settings=>{const saved=settings?.aiEnhancement||{},upgrade=Number(saved.agentConfigVersion)<3||saved.agentConfigVersion===undefined?{...(Number(saved.agentMaxCalls)===12&&saved.agentConfigVersion===undefined||Number(saved.agentMaxCalls)===20?{agentMaxCalls:24}:{}),...(Number(saved.agentMaxOutputTokens)===8192&&saved.agentConfigVersion===undefined?{agentMaxOutputTokens:16384}:{})}:{};return {...defaults,...saved,...upgrade,...Presets.restore(saved),enabled:saved.enabled===true,agentConfigVersion:3};};
 function endpoint(baseUrl){
  let url;try{url=new URL(String(baseUrl).trim());}catch{throw Error('服务地址无效，请填写 HTTPS Base URL');}
@@ -15,19 +15,22 @@ function validateConfig(value){
  if(!c.model||c.model.length>200||/[\r\n]/.test(c.model))throw Error('请填写有效模型名');
  if(c.mode!=='chat_completions')throw Error('当前仅支持 chat_completions 模式');
  if(!['fast','model'].includes(c.importSpeed))throw Error('账单识别模式须为快速识别或按模型设置');
- c.importConcurrency=Number(c.importConcurrency);if(!Number.isInteger(c.importConcurrency)||c.importConcurrency<1||c.importConcurrency>3)throw Error('识别并发批数须为 1 至 3 的整数');c.batchSize=Number(c.batchSize);c.timeoutSeconds=Number(c.timeoutSeconds);c.askMaxOutputTokens=Number(c.askMaxOutputTokens);
+ c.importConcurrency=Number(c.importConcurrency);if(!Number.isInteger(c.importConcurrency)||c.importConcurrency<1||c.importConcurrency>3)throw Error('识别并发批数须为 1 至 3 的整数');c.batchSize=Number(c.batchSize);c.timeoutSeconds=Number(c.timeoutSeconds);
  if(!Number.isInteger(c.batchSize)||c.batchSize<1||c.batchSize>100)throw Error('每批条数须为 1 至 100 的整数');
  if(!Number.isInteger(c.timeoutSeconds)||c.timeoutSeconds<1||c.timeoutSeconds>120)throw Error('请求超时须为 1 至 120 秒的整数');
- if(!Number.isInteger(c.askMaxOutputTokens)||c.askMaxOutputTokens<1||c.askMaxOutputTokens>32768)throw Error('AI 提问最大输出 token 须为 1 至 32768 的整数');
  c.agentMaxTokens=Number(c.agentMaxTokens);if(!Number.isInteger(c.agentMaxTokens)||c.agentMaxTokens<10000||c.agentMaxTokens>1000000)throw Error('Agent 累计 token 上限须为 10000 至 1000000 的整数');
  for(const [key,max] of [['agentMaxCalls',40],['agentMaxOutputTokens',32768],['agentMaxSeconds',3600]]){c[key]=Number(c[key]);if(!Number.isInteger(c[key])||c[key]<1||c[key]>max)throw Error(`${key} 须为 1 至 ${max} 的整数`);}c.agentEnabled=c.agentEnabled===true;c.agentShowSentFields=c.agentShowSentFields===true;
  return Reasoning.validate({...c,...Presets.restore({...value,...c})});
+}
+function hasCredentials(c){
+ if(typeof c.apiKey==='string'&&c.apiKey.trim())return true;
+ try{return Presets.localHost(new URL(c.baseUrl).hostname)==='loopback';}catch{return false;}
 }
 function unavailable(settings,userInitiated){
  const c=config(settings);
  if(!c.enabled)return 'AI 服务未开启';
  if(!userInitiated)return '请主动发起 AI 操作';
- if(typeof c.apiKey!=='string'||!c.apiKey.trim())return '未配置 API Key';
+ if(!hasCredentials(c))return '未配置 API Key';
  try{validateConfig(c);return '';}catch(e){return e.message;}
 }
 // Never display transport error.message, response bodies, headers or URLs: hosts
@@ -42,15 +45,28 @@ function responseError(response){
  return new ProviderError(detail?`HTTP ${response.status}：${detail}`:httpReason(response.status),response.status);
 }
 function sessionRequest(requestUrl,id){const session=Presets.sessionId(id);return params=>(requestUrl||require('obsidian').requestUrl)({...params,headers:{...params.headers,...Presets.goHeaders(params.url,session)}});}
-function usageOf(value){const usage=value&&typeof value==='object'?{...value}:{};for(const key of ['prompt_tokens','completion_tokens','total_tokens'])if(!Number.isFinite(usage[key])||usage[key]<0)delete usage[key];if(usage.total_tokens===undefined&&(usage.prompt_tokens!==undefined||usage.completion_tokens!==undefined))usage.total_tokens=(usage.prompt_tokens||0)+(usage.completion_tokens||0);return usage;}
+function usageOf(value){
+ const usage={};
+ for(const key of ['prompt_tokens','completion_tokens'])if(Number.isSafeInteger(value?.[key])&&value[key]>0)usage[key]=value[key];
+ const total=Math.max(Number.isSafeInteger(value?.total_tokens)?value.total_tokens:0,(usage.prompt_tokens||0)+(usage.completion_tokens||0));
+ if(total>0)usage.total_tokens=total;
+ return usage;
+}
+function trackUsage(total,response){
+ const usage=response.usage||{};
+ total.promptTokens+=usage.prompt_tokens||0;
+ total.completionTokens+=usage.completion_tokens||0;
+ total.totalTokens+=usage.total_tokens||response.estimatedTokens||1;
+ if(usage.total_tokens)total.reported=true;
+}
 class Cancelled extends ProviderError{}
 function transportReason(error){
  if(error instanceof ProviderError)return error.message;
  if(Number.isInteger(error?.status)&&error.status>=400&&error.status<=599)return httpReason(error.status);
  return ({ENOTFOUND:'服务域名无法解析',ECONNREFUSED:'服务拒绝连接',ECONNRESET:'连接被重置',ETIMEDOUT:'网络连接超时',CERT_HAS_EXPIRED:'服务证书已过期'}[error?.code])||'网络请求失败，请检查服务地址与网络';
 }
-function brief(value,key){let text=String(value);if(key)text=text.split(key).join('[已隐藏]');return text.replace(/[\u0000-\u001f\u007f]/g,' ').trim().slice(0,120);}
-async function completion(c,body,requestUrl,{signal}={}){
+function brief(value,key){let text=String(value);if(key?.length>=8)text=text.split(key).join('[已隐藏]');return text.replace(/[\u0000-\u001f\u007f]/g,' ').trim().slice(0,120);}
+async function requestOnce(c,body,requestUrl,signal){
  let timer,onAbort;
  try{
   // requestUrl has no cancellation parameter. The deadline abandons this result
@@ -58,18 +74,37 @@ async function completion(c,body,requestUrl,{signal}={}){
   const timeout=new Promise((_,reject)=>{timer=setTimeout(()=>reject(new ProviderError(`请求超时（${c.timeoutSeconds} 秒），本次请求已停止；迟到结果不会应用`)),c.timeoutSeconds*1000);});
   if(signal?.aborted)throw new Cancelled('用户已停止 AI 请求');
   const cancelled=new Promise((_,reject)=>{if(signal){onAbort=()=>reject(new Cancelled('用户已停止 AI 请求'));signal.addEventListener('abort',onAbort,{once:true});}});
-  const response=await Promise.race([Promise.resolve().then(()=>{
+  const wire=JSON.stringify(Reasoning.body(c,body));
+  const pending=Promise.resolve().then(()=>{
    if(signal?.aborted)throw new Cancelled('用户已停止 AI 请求');
    const request=requestUrl||require('obsidian').requestUrl;
-   return request({url:endpoint(c.baseUrl),method:'POST',contentType:'application/json',headers:Presets.headers(c),body:JSON.stringify(Reasoning.body(c,body)),throw:false});
-  }),timeout,cancelled]);
+   return request({url:endpoint(c.baseUrl),method:'POST',contentType:'application/json',headers:Presets.headers(c),body:wire,throw:false});
+  });
+  pending.catch(()=>{});
+  const response=await Promise.race([pending,timeout,cancelled]);
   if(!Number.isInteger(response?.status))throw new ProviderError('服务未返回有效 HTTP 状态');
   if(response.status<200||response.status>=300)throw responseError(response);
   let data;try{data=response.json??JSON.parse(response.text);}catch{throw new ProviderError('服务返回的响应不是有效 JSON');}
   if(!data?.choices?.[0]?.message)throw new ProviderError('服务返回的响应不是 chat_completions 格式');
-  return {...data.choices[0].message,finishReason:data.choices[0].finish_reason,responseModel:typeof data.model==='string'?data.model:'',usage:usageOf(data.usage)};
+  const message=data.choices[0].message,content=Array.isArray(message.content)?message.content.map(part=>typeof part==='string'?part:typeof part?.text==='string'?part.text:'').join(''):message.content;
+  return {...message,content,estimatedTokens:Math.max(1,Math.ceil((wire.length+String(content||'').length)/3)),finishReason:data.choices[0].finish_reason,responseModel:typeof data.model==='string'?data.model:'',usage:usageOf(data.usage)};
  }catch(e){if(e instanceof ProviderError)throw e;throw new ProviderError(transportReason(e),e?.status);}
  finally{clearTimeout(timer);if(onAbort)signal.removeEventListener('abort',onAbort);}
+}
+async function completion(c,body,requestUrl,{signal,shouldContinue=()=>true}={}){
+ for(let attempt=0;;attempt++){
+  if(signal?.aborted||!shouldContinue())throw new Cancelled('AI 请求已停止');
+  try{return await requestOnce(c,body,requestUrl,signal);}
+  catch(error){
+   if(![408,429].includes(error.status)||attempt>=2)throw error;
+   await new Promise((resolve,reject)=>{
+    const done=()=>{signal?.removeEventListener('abort',abort);resolve();};
+    const timer=setTimeout(done,100*2**attempt);
+    function abort(){clearTimeout(timer);signal?.removeEventListener('abort',abort);reject(new Cancelled('AI 请求已停止'));}
+    signal?.addEventListener('abort',abort,{once:true});if(signal?.aborted)abort();
+   });
+  }
+ }
 }
 function parseArray(content){
  if(typeof content!=='string'||content.length>1024*1024)return null;
@@ -145,14 +180,14 @@ function createProvider(settings,{requestUrl}={}){
   async prepare(records,{data,userInitiated=false,onProgress=()=>{},onChunk=null,shouldContinue=()=>true,signal,concurrency=1}={}){
    cache.clear();Object.assign(status,{engine:'local',total:records.length,enhanced:0,fallback:records.length,reasons:[]});
    const blocked=unavailable(settings,userInitiated);if(blocked){reason(blocked);return status;}
-   const started=Date.now(),c=importConfig(validateConfig(initial)),categories=categoryMap(data);let nextSize=c.batchSize,parallel=Math.max(1,Math.min(3,concurrency));
+   const started=Date.now(),c=importConfig(validateConfig(initial)),categories=categoryMap(data),request=sessionRequest(requestUrl);let nextSize=c.batchSize,parallel=Math.max(1,Math.min(3,concurrency));
    status.batches=[];status.elapsedMs=0;status.requestMs=0;status.mergeMs=0;
    const progress=()=>onProgress({phase:'enhancing',done:cache.size,total:records.length,elapsedMs:Date.now()-started,nextBatchSize:nextSize,nextConcurrency:parallel,batches:C.clone(status.batches.slice(-5)),message:'AI 识别 · 最多 '+concurrency+' 批同时处理'});
    const attempt=async chunk=>{
     const job={index:status.batches.length+1,count:chunk.length,accepted:0,durationMs:0,state:'running',reason:''},at=Date.now();status.batches.push(job);progress();
     try{
     if(signal?.aborted)throw new Cancelled('用户已停止 AI 请求');
-    const content=(await completion(c,requestBody(c,chunk,categories),requestUrl,{signal})).content;
+    const content=(await completion(c,requestBody(c,chunk,categories),request,{signal,shouldContinue})).content;
     if(signal?.aborted||!shouldContinue())return;
     const parsed=parseArray(content);
     if(!parsed){reason('模型返回无法解析的 JSON 数组');return;}
@@ -240,4 +275,4 @@ function engineStatus(batch,settings){
  if(status){const detail=status.enhanced?`AI 建议 ${status.enhanced} 笔，本地回退 ${status.fallback} 笔`:status.reasons.join('；')||'没有可识别的未手改记录';return {label:status.enhanced?'AI 账单识别':'本地规则',detail:status.enhanced?[detail,...status.reasons,...(!c.enabled?['AI 服务已关闭，当前队列保留已有建议']:[])].join('；'):detail};}
  return {label:'本地规则',detail:!c.enabled?'AI 服务未开启':!c.apiKey?'未配置 API Key':'导入只用本地规则；点击「AI 识别」后才发送摘要'};
 }
-module.exports={responseError,sessionRequest,usageOf,testAgent,importConfig,speedDetail,completion,transportReason,defaults,config,validateConfig,endpoint,unavailable,createProvider,enhance,candidates,testConnection,engineStatus,parseArray,httpReason,ProviderError};
+module.exports={hasCredentials,usageOf,trackUsage,brief,responseError,sessionRequest,usageOf,testAgent,importConfig,speedDetail,completion,transportReason,defaults,config,validateConfig,endpoint,unavailable,createProvider,enhance,candidates,testConnection,engineStatus,parseArray,httpReason,ProviderError};

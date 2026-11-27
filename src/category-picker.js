@@ -32,7 +32,6 @@ function create(parent,name,value,choices){
  input.addEventListener('compositionstart',()=>composing=true);input.addEventListener('compositionend',()=>{composing=false;items=search(choices,input.value);active=0;render();});
  input.addEventListener('input',()=>{if(!composing){items=search(choices,input.value);active=0;render();}});
  box.addEventListener('keydown',e=>{if(!opened||composing||e.isComposing)return;if(e.key==='Escape'){e.preventDefault();e.stopPropagation();close(true);}else if(e.target===input&&['ArrowDown','ArrowUp','Enter'].includes(e.key)){e.preventDefault();e.stopPropagation();if(e.key==='Enter'){if(items[active])choose(items[active][0]);}else{active=Math.max(0,Math.min(items.length-1,active+(e.key==='ArrowDown'?1:-1)));render();list.querySelector?.('.active')?.scrollIntoView({block:'nearest',behavior:'instant'});}}});
- box.addEventListener('focusout',e=>{if(opened&&!box.contains(e.relatedTarget))close(false);});
  Object.defineProperties(field,{value:{get:()=>selected,set:x=>{selected=String(x??'');caption();}},disabled:{get:()=>disabled,set:x=>{disabled=!!x;trigger.disabled=input.disabled=disabled;if(disabled)close(false);}}});
  field.setChoices=next=>{close(false);choices=[...next.filter(x=>x[0]===''),...next.filter(x=>x[0]!=='')];if(!choices.some(x=>x[0]===selected))selected='';items=choices.slice();active=0;caption();};
  field.focus=()=>trigger.focus();field.choose=choose;field.picker={box,trigger,input,list,popup,current,open,close,dispose:()=>close(false),get opened(){return opened;}};box.categoryPicker=field.picker;

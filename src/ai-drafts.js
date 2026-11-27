@@ -1,4 +1,5 @@
 'use strict';
+const IO=require('./vault-io');
 const C=require('./core'),AI=require('./ai-import');
 const PATH='Carrot记账/AI复核草稿.json',LIMIT=64*1024*1024,MAX_ROWS=20000;
 const object=x=>x&&typeof x==='object'&&!Array.isArray(x),strings=x=>Array.isArray(x)&&x.every(v=>typeof v==='string');
@@ -55,20 +56,22 @@ function reconcile(batch,d){
 function restore(item,d){const batch=C.clone(item.batch);reconcile(batch,d);return {batch,selected:new Set(),group:item.group,page:0,busy:false,progress:null,error:'',draftStatus:'saved',draftAt:item.updatedAt,draftError:''};}
 class DraftStore{
  constructor(vault){this.vault=vault;this.raw=null;this.data={version:1,revision:0,drafts:[]};this.error='';this.queue=Promise.resolve();this.states=new Map();}
- async load(){
-  await this.queue;try{const exists=await this.vault.adapter.exists(PATH),raw=exists?await this.vault.adapter.read(PATH):null,data=raw===null?{version:1,revision:0,drafts:[]}:parse(raw);this.raw=raw;this.data=data;this.error='';this.states.clear();return true;}
-  catch(e){this.error='草稿读取失败：'+e.message;return false;}
- }
+ load(){return IO.enqueue(this,async()=>{
+  try{
+   const raw=await IO.read(this.vault,PATH);
+   this.data=raw===null?{version:1,revision:0,drafts:[]}:parse(raw);
+   this.raw=raw;this.error='';this.states.clear();return true;
+  }catch(error){this.error='草稿读取失败：'+error.message;return false;}
+ });}
  save(book,state){
   let item;try{item=pack(book,state);}catch(e){return Promise.reject(e);}
   const job=this.queue.then(async()=>{
    if(this.error)throw Error(this.error);
-   const exists=await this.vault.adapter.exists(PATH),raw=exists?await this.vault.adapter.read(PATH):null;
+   const raw=await IO.read(this.vault,PATH);
    if(raw!==this.raw)throw Error('草稿已在别处更新，请先重新读取，避免覆盖');
    const next=C.clone(this.data);next.revision++;next.drafts=next.drafts.filter(x=>x.book!==book);if(item)next.drafts.push(item);
    const text=JSON.stringify(next);parse(text);
-   if(raw===null){if(!await this.vault.adapter.exists('Carrot记账'))await this.vault.createFolder('Carrot记账');await this.vault.create(PATH,text);}
-   else{const file=this.vault.getAbstractFileByPath(PATH);if(!file)throw Error('草稿文件已变化，请重新读取');await this.vault.process(file,current=>{if(current!==raw)throw Error('保存时检测到草稿外部更新，已取消覆盖');return text;});}
+   await IO.mkdir(this.vault,'Carrot记账');await IO.write(this.vault,PATH,text,raw);
    this.raw=text;this.data=next;return item?.updatedAt||'';
   });this.queue=job.catch(()=>{});return job;
  }
